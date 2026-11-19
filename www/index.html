@@ -2,7 +2,7 @@
 <html lang="fa" dir="rtl"><head>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><meta name="theme-color" content="#0b0e14">
 <meta name="theme-color" content="#0b0e14">
 <title>سامانه هوشمند نوسان‌گیری رمزارز | نوبیتکس v4</title>
 
@@ -167,6 +167,51 @@ tr.clickable{cursor:pointer}
 @keyframes fu{from{color:var(--green);background:#2ecc7130}to{background:transparent}}
 @keyframes fd{from{color:var(--red);background:#e74c3c30}to{background:transparent}}
 .diag{font-size:.68rem;color:var(--text3);direction:rtl}
+
+/* ===== نسخه موبایل (v5-mobile) ===== */
+html{overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent}
+#mobMore,#mobFilterBtn{display:none}
+@media (max-width:700px){
+  body{padding:8px;padding-top:calc(8px + env(safe-area-inset-top,0px));padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  header{padding:10px 12px;margin-bottom:8px}
+  header h1{font-size:.9rem;width:100%;margin-bottom:6px}
+  .status-bar{gap:8px;width:100%}
+  .status-bar .refresh-btn,#mobMore,#mobFilterBtn{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:6px 12px}
+  #eventsBtn,#proxyBtn,#testSoundBtn,#diagBar,#analysisBadge{display:none}
+  header.more #eventsBtn,header.more #proxyBtn,header.more #testSoundBtn,header.more #diagBar,header.more #analysisBadge{display:inline-flex}
+  .v4-connection{display:none}
+  .filters{padding:8px 10px;gap:8px}
+  .filters>*:not(:nth-child(1)):not(:nth-child(3)):not(#mobFilterBtn){display:none}
+  .filters.open>*{display:flex}
+  .filters.open>span{display:inline}
+  .filters label{width:100%;justify-content:space-between}
+  .filters input[type=text],.filters input[type=number],.filters select{font-size:16px;min-height:38px;max-width:60%}
+  #mobFilterBtn{width:100%;background:#1f2735;border:1px solid #39465b;color:var(--text);border-radius:8px;font-size:.8rem}
+  .analysis-status{font-size:.72rem}
+  .table-wrapper{overflow:visible;border-radius:10px}
+  table{min-width:0!important;width:100%;font-size:.8rem}
+  th:nth-child(n),td:nth-child(n){display:none}
+  th:nth-child(2),th:nth-child(3),th:nth-child(4),th:nth-child(17),
+  td:nth-child(2),td:nth-child(3),td:nth-child(4),td:nth-child(17){display:table-cell}
+  td[colspan]{display:table-cell!important}
+  th,td{padding:11px 6px!important;vertical-align:middle}
+  th{position:sticky;top:0;z-index:2;background:var(--surface2)}
+  tbody tr[data-id]{cursor:pointer}
+  tbody tr[data-id]:active{background:#ffffff0d}
+  .footer{font-size:.66rem;line-height:1.9}
+  /* جزئیات: صفحه کامل */
+  .modal-overlay{padding:0;align-items:stretch}
+  .modal-box{max-height:none;height:100dvh;border-radius:0;border:none;padding:calc(14px + env(safe-area-inset-top,0px)) 12px calc(18px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}
+  .modal-close{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:10px;width:44px;height:44px;border-radius:50%;background:#1f2735;border:1px solid #39465b;font-size:1.6rem;z-index:5;display:flex;align-items:center;justify-content:center}
+  .modal-title{padding-left:52px;font-size:1.05rem}
+  .modal-chart{height:260px}
+  .dr{padding:10px}
+  .dr table{font-size:.72rem}
+  .dr th,.dr td{padding:6px 5px}
+  .dr-score{font-size:1.5rem}
+  .dr-levels{grid-template-columns:1fr 1fr}
+}
+
 
 .error-bar{white-space:normal;overflow-wrap:anywhere;direction:rtl;text-align:right;line-height:1.9}.quote-old{opacity:.6;text-decoration:underline dotted #e8b767}.v4-connection{margin-bottom:12px;padding:12px 15px;border:1px solid #6b512b;background:#2d2418;border-radius:9px;color:#dec494;font-size:.78rem;line-height:1.9}.v4-dialog{width:650px;max-width:94vw;max-height:90vh;padding:22px;background:#141a24;color:#e0e6ed;border:1px solid #4b5870;border-radius:13px;overflow:auto}.v4-dialog::backdrop{background:#000b;backdrop-filter:blur(3px)}.v4-dialog p{font-size:.8rem;line-height:1.9;margin:12px 0;color:#aebdd0}.v4-dialog label{display:block;font-size:.78rem;margin:10px 0}.v4-dialog input[type=number],.v4-dialog input[type=url]{display:block;width:100%;margin-top:5px;padding:8px 10px;background:#0b0e14;border:1px solid #394860;border-radius:6px;color:#e0e6ed;direction:ltr}.v4-fields{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.v4-dialog button{padding:8px 12px;background:#293647;color:#e0e6ed;border:1px solid #4d5c70;border-radius:6px;cursor:pointer}.v4-actions{display:flex;gap:12px}.v4-dialog article{border-bottom:1px solid #293647;padding:10px 0}.v4-dialog small{color:#8196b1}.v4-chart-options{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:.75rem;margin-bottom:8px}.v4-note{font-size:.7rem;line-height:1.9;color:#8c9fbc;margin-bottom:10px}.v4-market-layers{padding:10px 16px;background:#101620}.v4-market-layers p{font-size:.7rem;line-height:1.9;color:#a1b3cc}.v4-market-layers svg{direction:ltr;display:block;width:100%;max-width:650px;margin:10px 0}.footer a{color:#90a8cc}button:focus-visible,tr[tabindex]:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #f7931a;outline-offset:3px}.modal-box{max-width:1150px}.tf-badge{font-size:.62rem}.mini-stat .k{font-size:.62rem}.mini-stat .v{font-size:.8rem}.tf-detail h5{line-height:1.9}.v4-dialog input[type=checkbox]{accent-color:#f7931a}@media(max-width:600px){.v4-fields{grid-template-columns:1fr}.v4-connection{font-size:.7rem}.v4-dialog{padding:15px}.tf-badge{font-size:.56rem}}
 </style>
@@ -1511,6 +1556,29 @@ else init();
 
 })();
 
+
+// ===== رفتار موبایل: دکمه‌های تاشو و دکمه برگشت اندروید =====
+(function(){
+  const mq=window.matchMedia('(max-width:700px)');
+  const hdr=document.querySelector('header'),bar=document.querySelector('.status-bar'),flt=document.querySelector('.filters');
+  if(bar){const b=document.createElement('button');b.id='mobMore';b.type='button';b.className='refresh-btn';b.textContent='⋯ بیشتر';
+    b.onclick=()=>{hdr.classList.toggle('more');b.textContent=hdr.classList.contains('more')?'▲ کمتر':'⋯ بیشتر'};bar.insertBefore(b,bar.firstChild)}
+  if(flt){const b=document.createElement('button');b.id='mobFilterBtn';b.type='button';b.textContent='🎛 فیلترهای بیشتر';
+    b.onclick=()=>{flt.classList.toggle('open');b.textContent=flt.classList.contains('open')?'▲ بستن فیلترها':'🎛 فیلترهای بیشتر'};flt.appendChild(b)}
+  // دکمه برگشت: بستن جزئیات به‌جای خروج از برنامه
+  const modal=document.getElementById('detailModal');
+  if(modal){
+    let pushed=false;
+    new MutationObserver(()=>{
+      const open=modal.classList.contains('active');
+      if(open&&!pushed&&mq.matches){history.pushState({m:1},'');pushed=true}
+      else if(!open&&pushed){pushed=false;if(history.state&&history.state.m)history.back()}
+    }).observe(modal,{attributes:true,attributeFilter:['class']});
+    window.addEventListener('popstate',()=>{
+      if(pushed&&modal.classList.contains('active')){pushed=false;const c=document.getElementById('modalClose');if(c)c.click()}
+    });
+  }
+})();
 </script>
 
 </body></html>
