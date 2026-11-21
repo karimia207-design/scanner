@@ -1,7 +1,7 @@
 {
   "name": "سامانه هوشمند نوسان‌گیری رمزارز",
-  "short_name": "نوسان‌گیری",
-  "description": "سامانه شخصی رصد و تحلیل بازار رمزارز",
+  "short_name": "نوسان‌گیری ۶.۳",
+  "description": "سامانه شخصی رصد و تحلیل بازار رمزارز با اتصال امن خواندنی به نوبیتکس",
   "lang": "fa",
   "dir": "rtl",
   "start_url": "./",
@@ -10,5 +10,12 @@
   "orientation": "any",
   "background_color": "#0b1220",
   "theme_color": "#0b0e14",
-  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }

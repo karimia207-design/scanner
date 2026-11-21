@@ -1,0 +1,3 @@
+Nobitex Scanner v6.3.0 - complete Capacitor source project
+Scope: Android READ-only Nobitex account integration
+No server / no cloud / no trading endpoints in account module

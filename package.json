@@ -1,10 +1,26 @@
 {
-  "name": "nobitex-scanner",
-  "version": "5.0.0",
+  "name": "nobitex-scanner-v63",
+  "version": "6.3.0",
   "private": true,
+  "type": "module",
+  "description": "Nobitex Scanner v6.3 - local Android app with read-only account connection",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build:native-bridge": "esbuild src/native-bridge.js --bundle --format=iife --target=es2022 --outfile=www/native-bridge.js",
+    "sync:android": "npm run build:native-bridge && cap sync android",
+    "setup:android": "node scripts/setup-android.mjs",
+    "open:android": "cap open android",
+    "verify:source": "node scripts/verify-source.mjs"
+  },
   "dependencies": {
-    "@capacitor/android": "^6.1.2",
-    "@capacitor/cli": "^6.1.2",
-    "@capacitor/core": "^6.1.2"
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/android": "^8.0.0",
+    "@aparajita/capacitor-secure-storage": "8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "esbuild": "^0.27.0"
   }
 }

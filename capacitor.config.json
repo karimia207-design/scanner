@@ -2,7 +2,15 @@
   "appId": "com.nobitex.scanner",
   "appName": "Nobitex Scanner",
   "webDir": "www",
-  "server": { "androidScheme": "https" },
-  "plugins": { "CapacitorHttp": { "enabled": true } },
-  "android": { "backgroundColor": "#0b0e14" }
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  },
+  "android": {
+    "backgroundColor": "#0b0e14"
+  }
 }

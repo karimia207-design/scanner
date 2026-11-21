@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="نوسان‌گیری">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<title>سامانه هوشمند نوسان‌گیری رمزارز | نوبیتکس v6.2</title>
+<title>سامانه هوشمند نوسان‌گیری رمزارز | نوبیتکس v6.3</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -353,12 +353,37 @@ button:focus-visible,tr[tabindex]:focus-visible,input:focus-visible,select:focus
 @media(orientation:landscape) and (max-height:520px){.v4-dialog{padding-top:8px;padding-bottom:8px}#tradeJournalDialog>div{max-height:52dvh!important}}
 
 </style>
+
+<style id="nbxApiStyles">
+#nbxApiPanel{margin:10px 0;padding:13px;border:1px solid #2d8b7960;border-radius:13px;background:linear-gradient(135deg,#10221f,#121a25);color:var(--text)}
+.nbxApiHead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.nbxApiTitle{font-weight:800;font-size:.92rem}.nbxApiSub{font-size:.73rem;color:var(--text2);line-height:1.8;margin-top:5px}
+.nbxApiActions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.nbxApiBadge{display:inline-flex;align-items:center;gap:5px;border:1px solid #64748b55;border-radius:999px;padding:4px 9px;font-size:.7rem;color:var(--text2)}
+.nbxApiBadge.ok{color:#6ee7a1;border-color:#2ecc7160;background:#2ecc7112}.nbxApiBadge.warn{color:#f6ce69;border-color:#f1c40f50;background:#f1c40f12}
+.nbxApiBtn{border:1px solid #3b8e7a;background:#174d42;color:#e9fff7;border-radius:8px;padding:8px 12px;font:inherit;font-size:.78rem;cursor:pointer}
+.nbxApiBtn.secondary{background:#202b39;border-color:#3b4658;color:var(--text)}.nbxApiBtn.danger{background:#491f28;border-color:#8c3c4a;color:#ffdce1}
+#nbxWalletSummary{margin-top:10px;border-top:1px solid #ffffff18;padding-top:9px;display:none}
+#nbxWalletSummary.visible{display:block}.nbxWalletRow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #ffffff10;font-size:.74rem}.nbxWalletRow span:last-child{text-align:left;direction:ltr;font-variant-numeric:tabular-nums}.nbxWalletRow.head{color:var(--text2);font-size:.68rem}
+#nbxApiModal{position:fixed;inset:0;z-index:10050;display:none;align-items:center;justify-content:center;padding:16px;background:#05080edb;backdrop-filter:blur(7px)}
+#nbxApiModal.open{display:flex}.nbxApiDialog{width:min(560px,100%);max-height:min(90dvh,780px);overflow:auto;background:#111925;border:1px solid #334155;border-radius:16px;padding:17px;box-shadow:0 24px 70px #0009;color:#e5edf7;direction:rtl}
+.nbxApiDialog h2{font-size:1rem;margin:0 0 7px}.nbxApiDialog p{font-size:.76rem;color:#aab8cc;line-height:1.9;margin:7px 0}
+.nbxApiField{display:block;margin-top:12px}.nbxApiField span{display:block;font-size:.76rem;margin-bottom:6px;color:#d5dfed}
+.nbxApiField input{width:100%;border:1px solid #3b485b;border-radius:9px;background:#0a111c;color:#f3f7fc;padding:11px;direction:ltr;text-align:left;font-family:ui-monospace,monospace;font-size:.76rem;outline:none}
+.nbxApiField input:focus{border-color:#39b99d;box-shadow:0 0 0 2px #39b99d22}
+.nbxApiNotice{border:1px solid #d2a33c44;background:#b8861614;border-radius:9px;padding:9px 11px;color:#f7d68b;font-size:.72rem;line-height:1.9;margin:12px 0}
+#nbxApiMessage{min-height:25px;font-size:.74rem;line-height:1.8;margin-top:10px;color:#9fb0c7;white-space:pre-wrap;overflow-wrap:anywhere}
+#nbxApiMessage.ok{color:#75e0a0}#nbxApiMessage.err{color:#ff9b9b}
+.nbxApiModalActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.nbxApiClose{float:left;background:transparent;color:#aab8cc;border:0;font-size:1.35rem;cursor:pointer}
+@media(max-width:520px){.nbxWalletRow{grid-template-columns:.75fr 1.2fr 1.2fr;font-size:.67rem}.nbxApiDialog{padding:13px}.nbxApiActions .nbxApiBtn{flex:1}}
+</style>
+
 </head>
 <body>
 
 <div class="container" id="app">
 <header>
-<h1>📊 سامانه هوشمند نوسان‌گیری • نوبیتکس v6.2</h1>
+<h1>📊 سامانه هوشمند نوسان‌گیری • نوبیتکس v6.3</h1>
 <div class="status-bar"><button id="mobMore" type="button" class="refresh-btn">⋯ بیشتر</button>
 <span><span class="dot green" id="statusDot"></span><span id="statusText">آمار بازار تازه است</span></span>
 <span class="last-update" id="lastUpdate">۱۴۰۵/۸/۲۹, ۲:۳۶:۱۵ | 2026-11-19 23:06:15 UTC</span>
@@ -372,6 +397,22 @@ button:focus-visible,tr[tabindex]:focus-visible,input:focus-visible,select:focus
 </div>
 </header><div class="v4-connection" id="connectionGuide">نسخه مستقل با نمودار داخلی؛ داده قیمت از نوبیتکس است. برای REST پایدار، بسته کامل را استخراج و Start-Windows.cmd را اجرا کنید یا واسط اختصاصی تنظیم کنید. پروکسی عمومی خودکار فعال نیست. ۵ دقیقه و روزانه با بازکردن جزئیات دریافت می‌شوند.</div>
 <div class="v4-connection" style="border-color:#2ecc7150;background:#2ecc710c">روش پیشنهادی این نسخه: تشخیص جهت در ۴ساعته و بررسی ورود در ۱ساعته؛ معاملات فقط Spot و بدون اهرم؛ فقط موقعیت خرید (Long). هدف محاسباتی خالص ۱:۲ به‌صورت پیش‌فرض (قابل‌تنظیم) است. «نامزد ورود» سیگنال قطعی یا دستور خرید نیست. سرمایه (USDT)، کارمزد واقعی حساب و لغزش را در تنظیمات وارد کنید؛ حد ضرر صرافی و سفارش خروج را پس از خرید جداگانه کنترل کنید.</div>
+
+
+<section id="nbxApiPanel" aria-label="اتصال خواندنی حساب نوبیتکس">
+  <div class="nbxApiHead">
+    <div>
+      <div class="nbxApiTitle">🔐 اتصال امن به حساب نوبیتکس <span style="color:#72dfaa;font-size:.7rem">(READ ONLY)</span></div>
+      <div class="nbxApiSub" id="nbxApiStatusText">کلید اختصاصی هنوز در این گوشی ثبت نشده است. برای مشاهده موجودی و تطبیق معاملات، اتصال خواندنی را تنظیم کنید.</div>
+    </div>
+    <span class="nbxApiBadge warn" id="nbxApiStatusBadge">اتصال برقرار نشده</span>
+  </div>
+  <div class="nbxApiActions">
+    <button type="button" class="nbxApiBtn" id="nbxApiOpenBtn">ورود یک‌باره کلید API</button>
+    <button type="button" class="nbxApiBtn secondary" id="nbxApiRefreshBtn" disabled>بروزرسانی موجودی</button>
+  </div>
+  <div id="nbxWalletSummary" aria-live="polite"></div>
+</section>
 
 <div class="filters">
 <label>🔎 جستجو:<input type="text" id="searchInput" placeholder="BTC, ETH..." style="width:120px;"></label>
@@ -2250,4 +2291,24 @@ if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(err=>console.warn('ثبت Service Worker ناموفق بود',err)));
 }
 </script>
+
+<div id="nbxApiModal" aria-hidden="true">
+  <div class="nbxApiDialog" role="dialog" aria-modal="true" aria-labelledby="nbxApiModalTitle">
+    <button type="button" class="nbxApiClose" id="nbxApiCloseBtn" aria-label="بستن">×</button>
+    <h2 id="nbxApiModalTitle">اتصال حساب نوبیتکس با API Key</h2>
+    <p>هر دو کلید عمومی و خصوصی مربوط به یک API Key را وارد کنید. برنامه ابتدا دسترسی خواندن کیف‌پول‌ها را آزمایش می‌کند و فقط پس از پاسخ موفق، مقادیر را روی همین گوشی ذخیره می‌کند.</p>
+    <div class="nbxApiNotice">این قابلیت فقط در نسخه نصب‌شده اندروید فعال است. اطلاعات در Android Keystore رمزگذاری می‌شود؛ در localStorage، فایل HTML یا فضای ابری ذخیره نمی‌شود. این بخش فقط درخواست GET موجودی کیف‌پول‌ها را اجرا می‌کند.</div>
+    <label class="nbxApiField"><span>کلید عمومی (Public Key)</span><input id="nbxApiPublicInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Public Key نوبیتکس"></label>
+    <label class="nbxApiField"><span>کلید خصوصی (Private Key)</span><input id="nbxApiPrivateInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Private Key نوبیتکس"></label>
+    <div id="nbxApiMessage" role="status" aria-live="polite">مجوز API در پنل نوبیتکس باید فقط READ باشد.</div>
+    <div class="nbxApiModalActions">
+      <button type="button" class="nbxApiBtn" id="nbxApiSaveBtn">آزمایش اتصال و ذخیره امن</button>
+      <button type="button" class="nbxApiBtn secondary" id="nbxApiCancelBtn">انصراف</button>
+      <button type="button" class="nbxApiBtn danger" id="nbxApiForgetBtn" style="display:none">حذف کلید از گوشی</button>
+    </div>
+  </div>
+</div>
+
+<script src="./native-bridge.js"></script>
+<script src="./nobitex-account.js"></script>
 </body></html>

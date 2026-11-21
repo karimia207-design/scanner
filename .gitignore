@@ -1,0 +1,15 @@
+node_modules/
+android/.gradle/
+android/.idea/
+android/build/
+android/app/build/
+android/local.properties
+*.jks
+*.keystore
+*.pem
+*.p12
+secrets/
+.env
+.env.*
+.DS_Store
+Thumbs.db
