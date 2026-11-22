@@ -79,3 +79,13 @@ Workflow موجود در `.github/workflows/android.yml` از `actions/setup-nod
 این نسخه، Node.js را در Workflow روی نسخه `22.21.1` قفل می‌کند و پیش از نصب وابستگی‌ها و نیز بلافاصله پیش از اجرای `npx cap add android` نسخه و مسیر اجرایی Node را کنترل می‌کند.
 
 **نکته مهم:** همه محتویات این بسته را در ریشه مخزن GitHub جایگزین کنید؛ به‌ویژه فایل مخفی `.github/workflows/android.yml` و فایل `.nvmrc`. اگر در مخزن Workflow قدیمی دیگری برای ساخت Android وجود دارد، اجرای دستی را از تب Actions روی Workflow با نام **Build Android APK** انجام دهید و Workflow قدیمی را غیرفعال کنید. در لاگ اجرای جدید باید مرحله `Set up Node.js 22.21.1` و سپس `Diagnose and enforce Node.js version` دیده شود. اگر این دو مرحله دیده نمی‌شوند، هنوز Workflow جدید اجرا نمی‌شود.
+
+## رفع اشکال اجباری Node.js 22 در GitHub Actions
+
+برای جلوگیری از اجرای ناخواسته Workflow قدیمی، فایل مستقل زیر نیز اضافه شده است:
+
+`.github/workflows/android-node22-forced.yml`
+
+پس از Commit و Push فایل‌ها به شاخه `main`، در GitHub وارد تب Actions شوید و Workflow با نام **ANDROID APK - FORCE NODE 22** را انتخاب و از گزینه **Run workflow** اجرا کنید. این Workflow فقط با اجرای دستی فعال می‌شود و در گزارش آن باید دو بخش `PROOF - verify the active Node runtime` و `Add Android platform using verified Node` دیده شود. در خروجی بخش اول باید `v22.21.1` ثبت شود.
+
+اگر این Workflow در تب Actions دیده نمی‌شود، فایل در مسیر دقیق `.github/workflows/android-node22-forced.yml` در شاخه پیش‌فرض مخزن Commit نشده است.
