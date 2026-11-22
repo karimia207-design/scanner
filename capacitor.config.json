@@ -1,16 +1,8 @@
 {
-  "appId": "com.nobitex.scanner",
-  "appName": "Nobitex Scanner",
+  "appId": "ir.araedavari.nobitexscanner",
+  "appName": "نوسان‌گیری نوبیتکس",
   "webDir": "www",
   "server": {
     "androidScheme": "https"
-  },
-  "plugins": {
-    "CapacitorHttp": {
-      "enabled": true
-    }
-  },
-  "android": {
-    "backgroundColor": "#0b0e14"
   }
 }
