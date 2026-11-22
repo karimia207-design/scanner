@@ -20,10 +20,10 @@
     message.className = kind;
   }
   function showModal() {
-    if (!bridge?.isAndroid) {
-      setMessage('اتصال حساب فقط در APK اندروید فعال است. نسخه وب و GitHub Pages امکان نگهداری امن کلید در Android Keystore را ندارند.', 'err');
-    } else {
+    if (bridge?.isAndroid) {
       setMessage('مجوز API در پنل نوبیتکس باید فقط READ باشد. کلیدها باید متعلق به یک جفت باشند.');
+    } else {
+      setMessage('نسخه وب نیز پشتیبانی می‌شود؛ کلید خصوصی به CryptoKey غیرقابل‌استخراج تبدیل و فقط در حافظه محلی همین مرورگر ذخیره می‌شود. اتصال مستقیم به پشتیبانی CORS نوبیتکس و HTTPS نیاز دارد.');
     }
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
@@ -54,50 +54,168 @@
     const out = new Uint8Array(a.length + b.length);
     out.set(a, 0); out.set(b, a.length); return out;
   }
-  async function signEd25519(privateSeed, messageText) {
-    if (!crypto?.subtle) throw new Error('امضای امن در این نسخه WebView در دسترس نیست؛ Android System WebView را به‌روزرسانی کنید.');
+  async function importPrivateKey(privateKeyText) {
+    if (!crypto?.subtle) throw new Error('امضای امن Web Crypto در این مرورگر در دسترس نیست. از Chrome/Android System WebView به‌روز و نشانی HTTPS استفاده کنید.');
+    const seed = decodeB64Url(privateKeyText);
+    if (seed.length !== 32) throw new Error('طول Private Key معتبر نیست؛ کلید خصوصی Ed25519 باید به ۳۲ بایت رمزگشایی شود.');
     const prefix = Uint8Array.from([0x30,0x2e,0x02,0x01,0x00,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x04,0x22,0x04,0x20]);
-    const pkcs8 = concatBytes(prefix, privateSeed);
-    let key;
+    const pkcs8 = concatBytes(prefix, seed);
     try {
-      key = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
+      const key = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
+      if (key.extractable) throw new Error('کلید خصوصی به‌صورت غیرقابل‌استخراج ایجاد نشد.');
+      return key;
     } catch (e) {
-      throw new Error('این WebView از کلید Ed25519 پشتیبانی نمی‌کند. WebView اندروید را به‌روزرسانی کنید.');
+      if (e?.message?.includes('غیرقابل‌استخراج')) throw e;
+      throw new Error('این مرورگر از امضای Ed25519 با Web Crypto پشتیبانی نمی‌کند. Chrome یا Android System WebView را به‌روزرسانی کنید.');
+    } finally {
+      seed.fill(0);
+      pkcs8.fill(0);
     }
+  }
+  function isEd25519PrivateKey(value) {
+    return Boolean(value && typeof value === 'object' && value.type === 'private' && value.algorithm?.name === 'Ed25519' && Array.from(value.usages || []).includes('sign'));
+  }
+  async function signEd25519(privateKey, messageText) {
+    if (!crypto?.subtle) throw new Error('امضای امن در این مرورگر در دسترس نیست.');
+    const key = isEd25519PrivateKey(privateKey) ? privateKey : await importPrivateKey(privateKey);
     const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(messageText)));
     return base64Url(signature);
+  }
+
+  const WEB_DB_NAME = 'nobitex-account-web-v1';
+  const WEB_STORE_NAME = 'credentials';
+  function openWebCredentialDb() {
+    if (!window.isSecureContext) return Promise.reject(new Error('برای اتصال API در نسخه وب، برنامه باید از نشانی HTTPS (مانند GitHub Pages) باز شود؛ اجرای file:// پشتیبانی نمی‌شود.'));
+    if (!window.indexedDB) return Promise.reject(new Error('حافظه امن محلی مرورگر (IndexedDB) در دسترس نیست.'));
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(WEB_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(WEB_STORE_NAME)) request.result.createObjectStore(WEB_STORE_NAME, { keyPath: 'id' });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(new Error('بازکردن حافظه محلی API ناموفق بود.'));
+      request.onblocked = () => reject(new Error('حافظه API در تب دیگری در حال به‌روزرسانی است؛ سایر تب‌های برنامه را ببندید.'));
+    });
+  }
+  async function webCredentialGet() {
+    const db = await openWebCredentialDb();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(WEB_STORE_NAME, 'readonly');
+        const req = tx.objectStore(WEB_STORE_NAME).get('active');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(new Error('خواندن وضعیت API از حافظه مرورگر ناموفق بود.'));
+      });
+    } finally { db.close(); }
+  }
+  async function webCredentialSet(record) {
+    const db = await openWebCredentialDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(WEB_STORE_NAME, 'readwrite');
+        tx.objectStore(WEB_STORE_NAME).put({ id: 'active', ...record, storedAt: Date.now() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(new Error('ذخیره کلید امضای API در حافظه مرورگر ناموفق بود.'));
+        tx.onabort = () => reject(new Error('ذخیره کلید API لغو شد.'));
+      });
+    } finally { db.close(); }
+  }
+  async function webCredentialRemove() {
+    const db = await openWebCredentialDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(WEB_STORE_NAME, 'readwrite');
+        tx.objectStore(WEB_STORE_NAME).delete('active');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(new Error('حذف کلید API از حافظه مرورگر ناموفق بود.'));
+      });
+    } finally { db.close(); }
+  }
+  async function loadCredentials() {
+    if (bridge?.isAndroid) {
+      const [publicKey, privateKey] = await Promise.all([bridge.secureGet(STORE_PUBLIC), bridge.secureGet(STORE_PRIVATE)]);
+      return publicKey && privateKey ? { publicKey, privateKey, native: true } : null;
+    }
+    const record = await webCredentialGet();
+    if (!record) return null;
+    if (!record.publicKey || !isEd25519PrivateKey(record.privateKey)) throw new Error('اطلاعات کلید ذخیره‌شده در مرورگر معتبر نیست؛ کلید را حذف و دوباره ثبت کنید.');
+    return { publicKey: record.publicKey, privateKey: record.privateKey, native: false };
+  }
+  async function persistCredentials(publicKey, privateKey) {
+    if (bridge?.isAndroid) {
+      await bridge.secureSet(STORE_PUBLIC, publicKey);
+      await bridge.secureSet(STORE_PRIVATE, privateKey);
+    } else {
+      await webCredentialSet({ publicKey, privateKey });
+    }
+  }
+  async function removeCredentials() {
+    if (bridge?.isAndroid) await Promise.all([bridge.secureRemove(STORE_PUBLIC), bridge.secureRemove(STORE_PRIVATE)]);
+    else await webCredentialRemove();
   }
   async function signedWalletRequest(publicKey, privateKey) {
     const path = '/users/wallets/list';
     const method = 'GET';
     const timestamp = String(Math.floor(Date.now() / 1000));
-    const seed = decodeB64Url(privateKey);
     const publicBytes = decodeB64Url(publicKey);
-    if (seed.length !== 32) throw new Error('طول Private Key معتبر نیست؛ کلید خصوصی Ed25519 باید به ۳۲ بایت رمزگشایی شود.');
     if (publicBytes.length !== 32) throw new Error('طول Public Key معتبر نیست؛ کلید عمومی باید به ۳۲ بایت رمزگشایی شود.');
-    const signature = await signEd25519(seed, timestamp + method + path);
-    const response = await bridge.httpRequest({
-      url: API_BASE + path,
-      method,
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'NobitexScanner/6.3.0 Android',
-        'Nobitex-Key': String(publicKey).trim().replace(/\s+/g, ''),
-        'Nobitex-Timestamp': timestamp,
-        'Nobitex-Signature': signature
-      },
-      connectTimeout: 15000,
-      readTimeout: 20000,
-      responseType: 'json'
-    });
-    const data = response?.data;
+    const normalizedPublicKey = String(publicKey).trim().replace(/\s+/g, '');
+    const signature = await signEd25519(privateKey, timestamp + method + path);
+    let response, data;
+    if (bridge?.isAndroid) {
+      response = await bridge.httpRequest({
+        url: API_BASE + path,
+        method,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'NobitexScanner/7.1.0 Android',
+          'Nobitex-Key': normalizedPublicKey,
+          'Nobitex-Timestamp': timestamp,
+          'Nobitex-Signature': signature
+        },
+        connectTimeout: 15000,
+        readTimeout: 20000,
+        responseType: 'json'
+      });
+      if (!response || typeof response.status !== 'number') throw new Error('پاسخ HTTP معتبر از پل اندروید دریافت نشد. اتصال اینترنت و نسخه Android System WebView را بررسی کنید.');
+      data = response.data;
+    } else {
+      if (!window.isSecureContext) throw new Error('اتصال API در نسخه وب فقط از HTTPS امکان‌پذیر است؛ برنامه را از GitHub Pages با نشانی https باز کنید.');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        response = await fetch(API_BASE + path, {
+          method,
+          mode: 'cors',
+          credentials: 'omit',
+          cache: 'no-store',
+          redirect: 'error',
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+            'Nobitex-Key': normalizedPublicKey,
+            'Nobitex-Timestamp': timestamp,
+            'Nobitex-Signature': signature
+          }
+        });
+        data = await response.json().catch(() => null);
+      } catch (e) {
+        if (e?.name === 'AbortError') throw new Error('مهلت اتصال به API نوبیتکس تمام شد.');
+        if (e instanceof TypeError) throw new Error('مرورگر نتوانست به API اختصاصی نوبیتکس دسترسی پیدا کند. ممکن است CORS برای مبدأ GitHub Pages مجاز نباشد یا ارتباط شبکه برقرار نباشد. این محدودیت مرورگر با ذخیره کلید برطرف نمی‌شود.');
+        throw e;
+      } finally { clearTimeout(timer); }
+    }
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch { /* keep original response for diagnostics */ }
+    }
     if (response.status < 200 || response.status >= 300 || !data || data.status !== 'ok' || !Array.isArray(data.wallets)) {
-      const code = data?.code ? String(data.code) : `HTTP_${response?.status ?? 'UNKNOWN'}`;
+      const code = data?.code ? String(data.code) : `HTTP_${response.status}`;
       const serverMessage = data?.message || data?.detail || data?.error;
-      if (response?.status === 401) throw new Error('احراز هویت ناموفق است. جفت Public/Private را بررسی کنید و تاریخ و ساعت گوشی را روی حالت خودکار بگذارید.');
-      if (response?.status === 403) throw new Error('درخواست رد شد. مجوز READ، وضعیت IP و فعال‌بودن API Key را در پنل نوبیتکس بررسی کنید.');
-      if (response?.status === 429) throw new Error('محدودیت تعداد درخواست نوبیتکس فعال شده است؛ کمی بعد دوباره تلاش کنید.');
-      throw new Error(`اتصال موفق نبود (${code})${serverMessage ? ': ' + String(serverMessage).slice(0, 180) : ''}`);
+      const detail = serverMessage ? String(serverMessage).slice(0, 240) : (typeof data === 'string' ? data.slice(0, 180) : 'بدون توضیح متنی از سرور');
+      if (response.status === 401) throw new Error(`نوبیتکس احراز هویت را نپذیرفت (401 / ${code}). جفت کلید، امضای دیجیتال و ساعت دستگاه را بررسی کنید. پاسخ سرور: ${detail}`);
+      if (response.status === 403) throw new Error(`نوبیتکس درخواست را رد کرد (403 / ${code}). مجوز READ و IP مجاز کلید را بررسی کنید. پاسخ سرور: ${detail}`);
+      if (response.status === 429) throw new Error(`محدودیت درخواست نوبیتکس (429 / ${code}). ${detail}`);
+      throw new Error(`خطای API نوبیتکس: HTTP ${response.status} / ${code}. پاسخ سرور: ${detail}`);
     }
     return data.wallets;
   }
@@ -129,88 +247,82 @@
     walletSummary.classList.add('visible');
   }
   async function checkSavedKeys() {
-    if (!bridge?.isAndroid) {
-      statusText.textContent = 'اتصال حساب در نسخه وب فعال نیست؛ برای ذخیره امن کلید باید APK اندروید نصب شود.';
-      statusBadge.textContent = 'فقط نسخه اندروید';
-      statusBadge.className = 'nbxApiBadge warn';
-      refreshButton.disabled = true;
-      return;
-    }
     try {
-      const [pub, priv] = await Promise.all([bridge.secureGet(STORE_PUBLIC), bridge.secureGet(STORE_PRIVATE)]);
-      const connected = Boolean(pub && priv);
-      statusText.textContent = connected ? 'کلیدها به‌صورت رمزگذاری‌شده روی همین گوشی ذخیره شده‌اند. برای دریافت موجودی، دکمه بروزرسانی را بزنید.' : 'کلید اختصاصی هنوز در این گوشی ثبت نشده است. برای مشاهده موجودی و تطبیق معاملات، اتصال خواندنی را تنظیم کنید.';
-      statusBadge.textContent = connected ? 'کلید ذخیره‌شده' : 'اتصال برقرار نشده';
+      if (!bridge?.isAndroid && !window.isSecureContext) {
+        statusText.textContent = 'برای افزودن API در نسخه وب، برنامه را از نشانی HTTPS باز کنید؛ اجرای فایل HTML به‌صورت file:// پشتیبانی نمی‌شود.';
+        statusBadge.textContent = 'نیازمند HTTPS'; statusBadge.className = 'nbxApiBadge warn';
+        refreshButton.disabled = true; forgetButton.style.display = 'none'; return;
+      }
+      const credentials = await loadCredentials();
+      const connected = Boolean(credentials);
+      statusText.textContent = connected
+        ? (bridge?.isAndroid ? 'کلیدها در Android Keystore همین گوشی ذخیره شده‌اند؛ اتصال فقط‌خواندنی فعال است.' : 'کلید عمومی و کلید امضای غیرقابل‌استخراج در حافظه محلی همین مرورگر ذخیره شده‌اند؛ اتصال فقط‌خواندنی فعال است.')
+        : 'کلید اختصاصی هنوز در این دستگاه ثبت نشده است. برای دریافت موجودی، کلیدهای API فقط‌خواندنی را اضافه کنید.';
+      statusBadge.textContent = connected ? 'کلید ذخیره‌شده؛ آماده بررسی' : 'اتصال برقرار نشده';
       statusBadge.className = connected ? 'nbxApiBadge ok' : 'nbxApiBadge warn';
       refreshButton.disabled = !connected;
       forgetButton.style.display = connected ? '' : 'none';
     } catch (e) {
-      statusText.textContent = 'فضای ذخیره امن اندروید در دسترس نیست. نسخه Capacitor و افزونه Secure Storage باید نصب و همگام‌سازی شوند.';
-      statusBadge.textContent = 'نیازمند تنظیم فنی';
-      statusBadge.className = 'nbxApiBadge warn';
-      refreshButton.disabled = true;
+      statusText.textContent = e?.message || 'حافظه امن محلی برای API در دسترس نیست.';
+      statusBadge.textContent = 'نیازمند بررسی'; statusBadge.className = 'nbxApiBadge warn';
+      refreshButton.disabled = true; forgetButton.style.display = 'none';
     }
   }
   async function refreshWallets() {
-    if (!bridge?.isAndroid) return showModal();
     refreshButton.disabled = true;
     statusText.textContent = 'در حال دریافت موجودی از نوبیتکس…';
     try {
-      const [pub, priv] = await Promise.all([bridge.secureGet(STORE_PUBLIC), bridge.secureGet(STORE_PRIVATE)]);
-      if (!pub || !priv) throw new Error('کلید API در فضای امن گوشی پیدا نشد.');
-      const wallets = await signedWalletRequest(pub, priv);
+      const credentials = await loadCredentials();
+      if (!credentials) throw new Error('کلید API در حافظه امن این دستگاه پیدا نشد.');
+      const wallets = await signedWalletRequest(credentials.publicKey, credentials.privateKey);
       renderWallets(wallets);
       statusText.textContent = `اتصال خواندنی برقرار است؛ ${fmt(wallets.length)} کیف‌پول از نوبیتکس دریافت شد.`;
       statusBadge.textContent = 'متصل و فقط خواندنی';
       statusBadge.className = 'nbxApiBadge ok';
     } catch (e) {
       statusText.textContent = e?.message || 'خطا در دریافت موجودی.';
-      statusBadge.textContent = 'خطا در اتصال';
-      statusBadge.className = 'nbxApiBadge warn';
-    } finally {
-      refreshButton.disabled = false;
-    }
+      statusBadge.textContent = 'خطا در اتصال'; statusBadge.className = 'nbxApiBadge warn';
+    } finally { refreshButton.disabled = false; }
   }
   async function saveKeys() {
-    if (!bridge?.isAndroid) return setMessage('این قابلیت فقط در APK اندروید نصب‌شده فعال است؛ از نسخه GitHub Pages برای واردکردن کلید استفاده نکنید.', 'err');
-    const publicKey = $('nbxApiPublicInput').value.trim();
-    const privateKey = $('nbxApiPrivateInput').value.trim();
-    if (!publicKey || !privateKey) return setMessage('هر دو مقدار Public Key و Private Key لازم است.', 'err');
+    const publicKey = $('nbxApiPublicInput').value.trim().replace(/\s+/g, '');
+    const privateKeyText = $('nbxApiPrivateInput').value.trim();
+    if (!publicKey || !privateKeyText) return setMessage('هر دو مقدار Public Key و Private Key لازم است.', 'err');
+    if (!bridge?.isAndroid && !window.isSecureContext) return setMessage('نسخه وب باید از نشانی HTTPS اجرا شود؛ از اجرای مستقیم فایل HTML استفاده نکنید.', 'err');
     saveButton.disabled = true;
     saveButton.textContent = 'در حال آزمایش امضا و اتصال…';
-    setMessage('در حال ارسال درخواست فقط‌خواندنی به نوبیتکس؛ کلیدها هنوز ذخیره نشده‌اند…');
+    setMessage('در حال ارسال درخواست فقط‌خواندنی به نوبیتکس؛ کلید تا دریافت پاسخ موفق ذخیره نمی‌شود…');
+    let privateKeyForTest = privateKeyText;
     try {
-      const wallets = await signedWalletRequest(publicKey, privateKey);
-      // Persist only after a successful signed READ request.
-      await bridge.secureSet(STORE_PUBLIC, publicKey);
-      await bridge.secureSet(STORE_PRIVATE, privateKey);
+      if (!bridge?.isAndroid) privateKeyForTest = await importPrivateKey(privateKeyText);
+      const wallets = await signedWalletRequest(publicKey, privateKeyForTest);
+      await persistCredentials(publicKey, bridge?.isAndroid ? privateKeyText : privateKeyForTest);
       $('nbxApiPublicInput').value = '';
       $('nbxApiPrivateInput').value = '';
       renderWallets(wallets);
-      statusText.textContent = `اتصال خواندنی برقرار و کلیدها در Android Keystore ذخیره شدند؛ ${fmt(wallets.length)} کیف‌پول دریافت شد.`;
-      statusBadge.textContent = 'متصل و فقط خواندنی';
-      statusBadge.className = 'nbxApiBadge ok';
-      refreshButton.disabled = false;
-      forgetButton.style.display = '';
-      setMessage('اتصال موفق بود و کلیدها در فضای امن همین گوشی ذخیره شدند.', 'ok');
+      statusText.textContent = `اتصال خواندنی برقرار و کلید در ${bridge?.isAndroid ? 'Android Keystore' : 'حافظه محلی مرورگر'} ذخیره شد؛ ${fmt(wallets.length)} کیف‌پول دریافت شد.`;
+      statusBadge.textContent = 'متصل و فقط خواندنی'; statusBadge.className = 'nbxApiBadge ok';
+      refreshButton.disabled = false; forgetButton.style.display = '';
+      setMessage('اتصال موفق بود؛ فقط دسترسی READ استفاده شد و هیچ سفارش یا برداشتی انجام نمی‌شود.', 'ok');
       setTimeout(hideModal, 900);
     } catch (e) {
-      setMessage(e?.message || 'آزمایش اتصال ناموفق بود. کلیدی ذخیره نشد.', 'err');
+      $('nbxApiPrivateInput').value = '';
+      setMessage(e?.message ? `آزمایش اتصال ناموفق بود؛ کلیدی ذخیره نشد.\n${e.message}` : 'آزمایش اتصال ناموفق بود؛ کلیدی ذخیره نشد.', 'err');
     } finally {
       saveButton.disabled = false;
       saveButton.textContent = 'آزمایش اتصال و ذخیره امن';
     }
   }
   async function forgetKeys() {
-    if (!bridge?.isAndroid) return;
-    if (!window.confirm('کلیدهای ذخیره‌شده فقط از این گوشی حذف شوند؟ این کار API Key را از پنل نوبیتکس باطل نمی‌کند.')) return;
+    if (!window.confirm('کلیدهای API فقط از همین دستگاه/مرورگر حذف شوند؟ این کار کلید را از پنل نوبیتکس باطل نمی‌کند.')) return;
     try {
-      await Promise.all([bridge.secureRemove(STORE_PUBLIC), bridge.secureRemove(STORE_PRIVATE)]);
+      await removeCredentials();
       walletSummary.replaceChildren(); walletSummary.classList.remove('visible');
       await checkSavedKeys();
-      setMessage('کلیدها از فضای امن این گوشی حذف شدند.', 'ok');
-    } catch { setMessage('حذف کلید از فضای امن ناموفق بود.', 'err'); }
+      setMessage('اطلاعات کلید از حافظه محلی این دستگاه حذف شد. برای ابطال واقعی، کلید را از پنل نوبیتکس حذف کنید.', 'ok');
+    } catch (e) { setMessage(e?.message || 'حذف کلید از حافظه محلی ناموفق بود.', 'err'); }
   }
+
 
   $('nbxApiOpenBtn').addEventListener('click', showModal);
   $('nbxApiCloseBtn').addEventListener('click', hideModal);
