@@ -1,0 +1,90 @@
+name: ANDROID APK - FORCE NODE 22
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-node22:
+    name: Build Android APK with Node 22.21.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js 22.21.1
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.21.1'
+          check-latest: true
+          cache: 'npm'
+          cache-dependency-path: package.json
+
+      - name: PROOF - verify the active Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== NODE RUNTIME DIAGNOSTICS ==="
+          echo "PATH=$PATH"
+          echo "node path: $(command -v node)"
+          echo "node version: $(node --version)"
+          echo "node executable: $(node -p 'process.execPath')"
+          echo "npm version: $(npm --version)"
+          node -e 'const v=Number(process.versions.node.split(".")[0]); if(v<22) { console.error("FATAL: Node.js >=22 required, found "+process.version); process.exit(1); } console.log("PASS: Capacitor Node requirement satisfied by "+process.version);'
+
+      - name: Install project dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm install --no-audit --no-fund
+
+      - name: Prepare web application
+        run: npm run prepare:web
+
+      - name: Add Android platform using verified Node
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== NODE CHECK IMMEDIATELY BEFORE CAPACITOR ==="
+          command -v node
+          node --version
+          node -e 'if(Number(process.versions.node.split(".")[0])<22) throw new Error("Node 22+ required");'
+          ./node_modules/.bin/cap --version
+          ./node_modules/.bin/cap add android
+
+      - name: Sync Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          ./node_modules/.bin/cap sync android
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nobitex-v7.4.2-debug-apk-node22
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
