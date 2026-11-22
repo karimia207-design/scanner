@@ -72,3 +72,10 @@ Capacitor 8 به Node.js نسخه 22 یا بالاتر نیاز دارد. این
 ### ساخت در GitHub Actions
 
 Workflow موجود در `.github/workflows/android.yml` از `actions/setup-node@v4` با `node-version: '22'` استفاده می‌کند. برای اجرای آن، آخرین محتوای ZIP را در ریشه مخزن بارگذاری کنید و از تب Actions، Workflow با عنوان **Build Android APK** را اجرا کنید. فایل APK خروجی در بخش Artifacts همان اجرای موفق قابل دریافت خواهد بود.
+
+
+## رفع خطای Node.js در GitHub Actions
+
+این نسخه، Node.js را در Workflow روی نسخه `22.21.1` قفل می‌کند و پیش از نصب وابستگی‌ها و نیز بلافاصله پیش از اجرای `npx cap add android` نسخه و مسیر اجرایی Node را کنترل می‌کند.
+
+**نکته مهم:** همه محتویات این بسته را در ریشه مخزن GitHub جایگزین کنید؛ به‌ویژه فایل مخفی `.github/workflows/android.yml` و فایل `.nvmrc`. اگر در مخزن Workflow قدیمی دیگری برای ساخت Android وجود دارد، اجرای دستی را از تب Actions روی Workflow با نام **Build Android APK** انجام دهید و Workflow قدیمی را غیرفعال کنید. در لاگ اجرای جدید باید مرحله `Set up Node.js 22.21.1` و سپس `Diagnose and enforce Node.js version` دیده شود. اگر این دو مرحله دیده نمی‌شوند، هنوز Workflow جدید اجرا نمی‌شود.
