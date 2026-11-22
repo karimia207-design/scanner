@@ -1,0 +1,91 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'index.html'
+      - 'manifest.webmanifest'
+      - 'icon*'
+      - 'native-bridge.js'
+      - 'nobitex-account.js'
+      - 'package.json'
+      - 'capacitor.config.json'
+      - 'scripts/**'
+      - '.nvmrc'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Build debug APK (Capacitor 8 / Node 22.21.1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Pin the runtime version explicitly. Capacitor 8 will not run on Node 20.
+      - name: Set up Node.js 22.21.1
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.21.1'
+          check-latest: true
+
+      - name: Diagnose and enforce Node.js version
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PATH=$PATH"
+          echo "Node executable: $(command -v node)"
+          node --version
+          node -p "process.execPath"
+          npm --version
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) { console.error(`ERROR: Node ${process.version} is active; Capacitor 8 requires Node >=22.0.0.`); process.exit(1); } console.log(`Node check passed: ${process.version}`);'
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install JavaScript dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Prepare web assets
+        run: npm run prepare:web
+
+      - name: Add Android platform (verify Node in same step)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Node executable: $(command -v node)"
+          node --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
+          npx cap --version
+          npx cap add android
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nobitex-v7.4.2-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
