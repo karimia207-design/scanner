@@ -1,0 +1,1 @@
+/* GitHub Pages fallback. The real Capacitor bridge is injected only in the Android build. */

@@ -1,23 +1,25 @@
 {
-  "name": "nobitex-smart-scanner",
-  "version": "7.4.2",
+  "name": "nobitex-scanner-android",
+  "version": "7.6.0",
   "private": true,
-  "description": "Nobitex multi-timeframe crypto market scanner wrapped with Capacitor for Android",
-  "engines": {
-    "node": ">=22.0.0"
-  },
+  "description": "Capacitor Android wrapper for Nobitex scanner v7.6.0",
   "scripts": {
-    "check:node": "node -e \"const major=Number(process.versions.node.split('.')[0]); console.log('Node.js',process.version); if(major<22){console.error('Capacitor 8 requires Node.js >=22. Install Node.js 22 LTS and retry.'); process.exit(1)}\"",
-    "prepare:web": "node scripts/prepare-web.mjs",
-    "cap:add:android": "npm run check:node && npm run prepare:web && cap add android",
-    "cap:sync:android": "npm run check:node && npm run prepare:web && cap sync android",
-    "android:debug": "npm run check:node && npm run cap:sync:android && cd android && ./gradlew assembleDebug"
+    "build:web": "node scripts/build-web.mjs",
+    "android:prepare": "node scripts/prepare-android.mjs",
+    "android:build": "npm run android:prepare && cd android && ./gradlew --no-daemon assembleDebug",
+    "validate": "node scripts/validate-release.mjs && node scripts/test-indicators.mjs && node scripts/test-indicator-reference-vectors.mjs",
+    "test:indicators": "node scripts/test-indicators.mjs",
+    "test:references": "node scripts/test-indicator-reference-vectors.mjs",
+    "android:release": "npm run android:prepare && cd android && ./gradlew --no-daemon --stacktrace assembleRelease"
   },
   "dependencies": {
-    "@capacitor/android": "8.6.0",
-    "@capacitor/core": "8.6.0"
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/local-notifications": "8.3.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.6.0"
+    "@capacitor/cli": "8.6.2",
+    "esbuild": "0.28.2"
   }
 }

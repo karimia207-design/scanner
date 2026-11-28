@@ -1,0 +1,26 @@
+# یادداشت ساخت نسخه ۷٫۶٫۰
+
+1. صفحه `mobile-index.html` در زمان ساخت به‌عنوان صفحه اصلی WebView در `www/index.html` کپی می‌شود.
+2. `npm run validate` آزمون‌های ساختار HTML، منطق ریسک، هیستریزیس، بک‌تست و بردارهای RSI را اجرا می‌کند.
+3. Workflow اندروید روی Runner وابستگی‌ها را نصب، پروژه Capacitor را تولید، افزونه بومی را کپی و APK را می‌سازد.
+4. Build پیش‌فرض Release است و به چهار Secret ثابت keystore نیاز دارد: `ANDROID_KEYSTORE_BASE64`، `ANDROID_KEYSTORE_PASSWORD`، `ANDROID_KEY_ALIAS` و `ANDROID_KEY_PASSWORD`.
+5. برای ساخت نخست، در صورت نبود `package-lock.json`، GitHub Runner آن را یک‌بار تولید می‌کند، سپس `npm ci` را اجرا و lockfile را به‌عنوان Artifact بارگذاری می‌کند. Artifact را Commit کنید تا Buildهای بعدی با lockfile دقیق انجام شوند.
+6. Actionهای شخص ثالث در Workflow با SHA کامل commit پین شده‌اند.
+7. متد `signedWalletRequest()` کلید رمزگذاری‌شده را داخل لایه Native بازیابی و فقط درخواست ثابت `GET /users/wallets/list` را امضا می‌کند. کلید خصوصی از متد امضا به JavaScript بازگردانده نمی‌شود.
+8. Back اندروید ابتدا history/overlay را مدیریت می‌کند و در ریشه `exitApp` اجرا نمی‌شود.
+9. سرویس Foreground، اعلان و heartbeat را مدیریت می‌کند؛ WebView هنوز موتور تحلیل است. Doze یا توقف WebView می‌تواند اسکن را متوقف کند.
+
+## موارد آزموده‌شده در محیط آماده‌سازی
+
+- `npm run validate` موفق.
+- `node --check` برای اسکریپت‌های Node و `web/app.js` موفق.
+- آزمون‌های عددی اندیکاتور، محاسبه معیارهای بک‌تست، پرشدن گپ حد ضرر، تجمیع پرتفوی و تثبیت وضعیت آماده موفق.
+- آزمون‌های خارجی RSI محدود به بردارهای ثابت مرزی و دنباله Wilder هستند؛ مقایسه خارجی تمام اندیکاتورها انجام نشده است.
+
+## موارد آزموده‌نشده
+
+- نصب وابستگی‌ها از npm registry در این محیط و تولید lockfile.
+- اجرای واقعی Gradle و ساخت APK Release.
+- امضای واقعی با keystore کاربر، نصب ارتقایی روی Samsung A37 و آزمون Back فیزیکی.
+- آزمون چندساعته Foreground Service در Doze و خاموشی صفحه.
+- اتصال زنده به API نوبیتکس و بک‌تست روی داده بازار واقعی ذخیره‌شده کاربر.

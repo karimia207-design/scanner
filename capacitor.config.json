@@ -1,6 +1,6 @@
 {
-  "appId": "ir.araedavari.nobitexscanner",
-  "appName": "نوسان‌گیری نوبیتکس",
+  "appId": "ir.nobitex.scanner",
+  "appName": "سامانه نوسان‌گیری نوبیتکس",
   "webDir": "www",
   "server": {
     "androidScheme": "https"
