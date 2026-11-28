@@ -7,7 +7,7 @@
     "build:web": "node scripts/build-web.mjs",
     "android:prepare": "node scripts/prepare-android.mjs",
     "android:build": "npm run android:prepare && cd android && ./gradlew --no-daemon assembleDebug",
-    "validate": "node scripts/validate-release.mjs && node scripts/test-indicators.mjs && node scripts/test-indicator-reference-vectors.mjs",
+    "validate": "node scripts/validate-build.mjs && node scripts/test-indicators.mjs && node scripts/test-indicator-reference-vectors.mjs",
     "test:indicators": "node scripts/test-indicators.mjs",
     "test:references": "node scripts/test-indicator-reference-vectors.mjs",
     "android:release": "npm run android:prepare && cd android && ./gradlew --no-daemon --stacktrace assembleRelease"
