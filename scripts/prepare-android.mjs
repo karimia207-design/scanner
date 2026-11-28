@@ -35,7 +35,7 @@ await copyFile(
   path.join(javaPackage, 'MarketMonitorService.java')
 );
 
-// Install launcher icons generated from the supplied v7.6.0 SVG mark.
+// Install launcher icons generated from the supplied v7.7.1 SVG mark.
 for (const density of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
   const target = path.join(androidDir, 'app', 'src', 'main', 'res', `mipmap-${density}`);
   await mkdir(target, { recursive: true });
@@ -103,17 +103,17 @@ const stringsPath = path.join(androidDir, 'app', 'src', 'main', 'res', 'values',
 await mkdir(path.dirname(stringsPath), { recursive: true });
 let strings = (await exists(stringsPath)) ? await readFile(stringsPath, 'utf8') : '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>\n';
 if (/<string name="app_name">[\s\S]*?<\/string>/.test(strings)) {
-  strings = strings.replace(/<string name="app_name">[\s\S]*?<\/string>/, '<string name="app_name">نوبیتکس ۷٫۶٫۰</string>');
+  strings = strings.replace(/<string name="app_name">[\s\S]*?<\/string>/, '<string name="app_name">نوبیتکس ۷٫۷٫۱</string>');
 } else {
-  strings = strings.replace('</resources>', '    <string name="app_name">نوبیتکس ۷٫۶٫۰</string>\n</resources>');
+  strings = strings.replace('</resources>', '    <string name="app_name">نوبیتکس ۷٫۷٫۱</string>\n</resources>');
 }
 await writeFile(stringsPath, strings, 'utf8');
 
 const gradlePath = path.join(androidDir, 'app', 'build.gradle');
 if (await exists(gradlePath)) {
   let gradle = await readFile(gradlePath, 'utf8');
-  gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode 760');
-  gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName "7.6.0"');
+  gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode 771');
+  gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName "7.7.1"');
   if (!gradle.includes('signingConfigs {')) {
     const signing = `\n    signingConfigs {\n        release {\n            def ksPath = System.getenv("NOBITEX_ANDROID_KEYSTORE_PATH")\n            if (ksPath != null && !ksPath.isEmpty()) {\n                storeFile file(ksPath)\n                storePassword System.getenv("NOBITEX_ANDROID_KEYSTORE_PASSWORD")\n                keyAlias System.getenv("NOBITEX_ANDROID_KEY_ALIAS")\n                keyPassword System.getenv("NOBITEX_ANDROID_KEY_PASSWORD")\n            }\n        }\n    }\n`;
     gradle = gradle.replace(/android\s*\{/, match => match + signing);

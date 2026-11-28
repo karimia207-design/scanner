@@ -1,4 +1,4 @@
-const CACHE='nobitex-v759-shell-v2';
+const CACHE='nobitex-v771-shell-v1';
 const SHELL=['./','./index.html','./mobile-index.html','./manifest.webmanifest','./icon.svg','./native-bridge.js','./nobitex-account.js','./vendor-lightweight-charts.js','./app.js','./pwa-register.js','./VERSION.txt'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});

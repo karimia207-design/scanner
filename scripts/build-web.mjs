@@ -21,7 +21,7 @@ for (const name of ['nobitex-account.js', 'icon.svg', 'manifest.webmanifest', 's
 // Keep the displayed PWA name in sync with the shipped application version.
 const manifestPath = path.join(out, 'manifest.webmanifest');
 let manifest = await readFile(manifestPath, 'utf8');
-manifest = manifest.replace('نوبیتکس ۷٫۵٫۹', 'نوبیتکس ۷٫۶٫۰');
+manifest = manifest.replace(/نوبیتکس [^"]+/, 'نوبیتکس ۷٫۷٫۱');
 await writeFile(manifestPath, manifest, 'utf8');
 
 await build({

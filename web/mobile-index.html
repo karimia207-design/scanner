@@ -11,7 +11,7 @@
 <meta content="نوسان‌گیری" name="apple-mobile-web-app-title"/>
 <link href="manifest.webmanifest" rel="manifest"/>
 <link href="icon.svg" rel="icon" type="image/svg+xml"/>
-<title>سامانه هوشمند نوسان‌گیری رمزارز | نوبیتکس v7.6.0</title>
+<title>سامانه هوشمند نوسان‌گیری رمزارز | نوبیتکس v7.7.1</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--line:var(--border);--panel:var(--surface);--text3:#8295ad;--bg:#0b0e14;--surface:#141a24;--surface2:#1a1f2b;--border:#2a3140;--text:#e0e6ed;--text2:#8899bb;--text3:#8295ad;--accent:#f7931a;--accent2:#f0b90b;--green:#2ecc71;--green2:#55dd99;--red:#e74c3c;--red2:#ff7d7d;--yellow:#f1c40f;--blue:#4a90e2;--purple:#9b59b6}
@@ -508,11 +508,45 @@ small,.muted,.text-muted{font-size:max(.69rem,inherit)}
   .dr-wrap tbody td,.six-review-wrap tbody td{font-size:.74rem}
 }
 </style>
+
+<style id="v771-clarity-and-layout">
+.opportunity-panel{margin:10px 0;padding:12px;border-radius:13px;background:linear-gradient(155deg,#102638,#101b2a 75%);border:1px solid #31516a;border-right:4px solid #21b79b}
+.opportunity-head{align-items:center}.opportunity-head p{max-width:720px;line-height:1.8}
+.opportunity-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:10px 0 12px;padding:8px 10px;border:1px solid #31485d;border-radius:9px;background:#0c1927}
+.opportunity-toolbar label{display:flex;align-items:center;gap:8px;font-size:.72rem;color:#b8c7d8}
+.opportunity-toolbar select{min-height:38px;max-width:100%;background:#152438;color:#e7eef7;border:1px solid #40566d;border-radius:8px;padding:6px 9px}
+.op-strategy-summary{display:flex;gap:6px;flex-wrap:wrap}.op-strategy-summary span{font-size:.65rem;color:#b7c9db;border:1px solid #344c63;border-radius:8px;padding:4px 7px;background:#101f30}.op-strategy-summary b{color:#e9f5ff}
+.op-card{padding:11px}.op-primary-reason{display:grid;gap:3px;margin:0 0 9px;padding:8px 10px;border-right:3px solid #d3a74d;border-radius:8px;background:#172538;color:#e3eaf2;font-size:.72rem;line-height:1.8}.op-primary-reason b{color:#f1d18e;font-size:.67rem}.op-core-grid,.op-ready-core{grid-template-columns:repeat(2,minmax(0,1fr))}
+.op-card-details{margin-top:9px;border-top:1px solid #2e435a;padding-top:7px}.op-card-details summary{cursor:pointer;color:#adc3d9;font-size:.68rem;font-weight:700}.op-card-details[open]{padding-bottom:4px}.op-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}.op-detail-grid span{min-width:0;padding:6px 7px;background:#101e2d;border:1px solid #293e53;border-radius:7px;color:#a9bbce;font-size:.65rem;overflow-wrap:anywhere}.op-detail-grid b{color:#e3edf7}.op-card-actions{margin-top:9px}.opportunity-wait-wrap{padding:8px 10px}.opportunity-empty{line-height:1.8}
+.watchlist-disclosure{margin:10px 0;border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:10px 12px}.watchlist-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer;list-style-position:inside}.watchlist-summary b{font-size:.83rem;color:#dce8f3}.watchlist-summary small{color:var(--text3);font-size:.66rem;margin-right:auto}.watchlist-content{padding-top:10px}.watchlist-content>div:first-child{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.ux-disclosure{margin:10px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:9px 12px}.ux-disclosure>summary{cursor:pointer;color:#d8e4f0;font-size:.78rem;font-weight:700}.ux-disclosure[open]>summary{padding-bottom:8px;border-bottom:1px solid var(--line)}
+@media(max-width:700px){.opportunity-panel{padding:9px}.opportunity-toolbar{align-items:stretch}.opportunity-toolbar label{justify-content:space-between}.opportunity-toolbar select{flex:1}.op-strategy-summary{width:100%}.op-strategy-summary span{flex:1 1 calc(50% - 6px);text-align:center}.op-card{padding:9px}.op-card-top b{font-size:.88rem}.op-primary-reason{font-size:.69rem}.watchlist-summary small{width:100%;margin:0}.watchlist-content>div:first-child{gap:8px}.op-detail-grid{grid-template-columns:1fr 1fr}}
+</style>
+
+<style id="v771-readability">
+/* v7.7.1 readability: compact primary decision, secondary information collapsed */
+.nbx-api-disclosure{margin:8px 0}.nbx-api-disclosure>summary{display:flex;align-items:center;gap:8px;min-height:38px}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:8px;margin:10px 0;padding:10px}
+.filters label{min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.76rem}
+.filters label input,.filters label select{max-width:100%;min-width:0}
+.opportunity-panel{margin:10px 0;padding:12px}
+.opportunity-head{gap:10px;align-items:flex-start}.opportunity-head p{max-width:70ch;font-size:.74rem;line-height:1.7}
+.opportunity-toolbar{margin:8px 0}.op-strategy-summary{gap:6px}.op-strategy-summary span{padding:4px 8px;font-size:.66rem}
+.opportunity-subtitle{margin:12px 0 7px;font-size:.78rem}
+.opportunity-grid{gap:9px}.op-card{padding:11px}.op-card-top{gap:8px}.op-card-top small{font-size:.67rem}
+.op-compact-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:9px 0}
+.op-compact-summary span{display:flex;flex-direction:column;gap:3px;min-width:0;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#101e2d}
+.op-compact-summary small{font-size:.63rem;color:var(--text3)}.op-compact-summary b{font-size:.78rem;color:var(--text);overflow-wrap:anywhere}
+.compact-monitor-card .op-primary-reason{margin-top:7px}.compact-monitor-card .op-card-details{margin-top:8px}
+.op-card-details>summary{padding:4px 0}.op-card-details:not([open]){border-color:#26384b}
+.opportunity-wait-wrap{margin-top:8px}.opportunity-foot{font-size:.67rem;line-height:1.8;margin-top:9px}
+@media(max-width:700px){.filters{display:flex}.opportunity-head{display:block}.opportunity-counts{margin-top:7px}.op-compact-summary{gap:5px}.op-compact-summary span{padding:6px}.op-compact-summary b{font-size:.72rem}.nbx-api-disclosure{margin:7px 0}}
+</style>
 </head>
 <body>
 <div class="container" id="app">
 <header>
-<h1>📊 سامانه هوشمند نوسان‌گیری • نوبیتکس v7.6.0</h1>
+<h1>📊 سامانه هوشمند نوسان‌گیری • نوبیتکس v7.7.1</h1>
 <div class="status-bar"><button class="refresh-btn" id="mobMore" type="button">⋯ بیشتر</button>
 <span><span class="dot yellow" id="statusDot"></span><span id="statusText">در انتظار دریافت آمار بازار</span></span>
 <span class="last-update" id="lastUpdate">هنوز داده‌ای دریافت نشده است</span>
@@ -525,8 +559,45 @@ small,.muted,.text-muted{font-size:max(.69rem,inherit)}
 <span class="badge-count" id="analysisBadge">بررسی: ۰/۰</span>
 </div>
 </header><div class="v4-connection" id="connectionGuide">نسخه مستقل با نمودار داخلی؛ داده قیمت از نوبیتکس است. برای REST پایدار، بسته کامل را استخراج و Start-Windows.cmd را اجرا کنید یا واسط اختصاصی تنظیم کنید. پروکسی عمومی خودکار فعال نیست. ۵ دقیقه و روزانه با بازکردن جزئیات دریافت می‌شوند.</div>
-<div class="v4-connection" style="border-color:#2ecc7150;background:#2ecc710c">روش پیشنهادی این نسخه: تشخیص جهت در ۴ساعته و بررسی ورود در ۱ساعته؛ معاملات فقط Spot و بدون اهرم؛ فقط موقعیت خرید (Long). هدف محاسباتی خالص ۱:۲ به‌صورت پیش‌فرض (قابل‌تنظیم) است. «نامزد ورود» سیگنال قطعی یا دستور خرید نیست. سرمایه (USDT)، کارمزد واقعی حساب و لغزش را در تنظیمات وارد کنید؛ حد ضرر صرافی و سفارش خروج را پس از خرید جداگانه کنترل کنید.</div>
-<section aria-label="اتصال خواندنی حساب نوبیتکس" id="nbxApiPanel">
+<div class="v4-connection" style="border-color:#2ecc7150;background:#2ecc710c">روش این نسخه: چهار الگوی خرید Spot بدون اهرم؛ تشخیص زمینه در ۴H/۱H و تأیید ورود در ۱۵m/۵m. هدف محاسباتی خالص ۱:۲ به‌صورت پیش‌فرض (قابل‌تنظیم) است. «نامزد ورود» سیگنال قطعی یا دستور خرید نیست. سرمایه (USDT)، کارمزد واقعی حساب و لغزش را در تنظیمات وارد کنید؛ حد ضرر صرافی و سفارش خروج را پس از خرید جداگانه کنترل کنید.</div>
+<section aria-live="polite" class="opportunity-panel" id="entryOpportunityPanel">
+<div class="opportunity-head">
+<div><b>🎯 پیشنهادهای معاملاتی نوبیتکس</b><p>چهار الگوی مستقل برای کشف فرصت بررسی می‌شوند. امتیاز کشف و قابلیت معامله فقط برای رتبه‌بندی پایش‌اند؛ مجوز ورود تنها پس از تأیید کندل بسته‌شده، هزینه‌ها و شروط ریسک صادر می‌شود.</p></div>
+<div class="opportunity-counts"><span id="opReadyCount">آماده بررسی ورود: ۰</span><span id="opWaitCount">در انتظار تکمیل/پایش: ۰</span><span id="opSurveillanceCount">واجد شرایط پایش ۵m/۱۵m: ۰</span><span id="opScannedCount">بررسی‌شده: ۰</span><span id="opTodayCount">فرصت‌های تأییدشده امروز: ۰ از هدف پایش ۵</span></div>
+</div>
+<div class="opportunity-toolbar"><label for="opportunityStrategyFilter">فیلتر استراتژی <select id="opportunityStrategyFilter"><option value="all" selected>همه استراتژی‌ها</option><option value="trend">ادامه روند</option><option value="pullback">اصلاح و بازگشت</option><option value="range">برگشت از کف محدوده</option><option value="breakout">شکست و بازآزمایی</option></select></label><div class="op-strategy-summary" id="opStrategySummary"></div></div>
+<div class="opportunity-subtitle">فرصت‌های آماده بررسی ورود</div>
+<div class="opportunity-grid" id="opportunityReadyList"><div class="opportunity-empty">هنوز فرصت دارای تمام شروط ورود تأیید نشده است. این بخش فقط فرصت‌هایی را نمایش می‌دهد که دروازه نهایی ریسک و ماشه کندل بسته‌شده را گذرانده‌اند.</div></div>
+<details class="opportunity-wait-wrap"><summary>نامزدهای در انتظار تکمیل شروط <span id="opportunityWaitSummary">۰ مورد</span></summary><div class="opportunity-grid compact" id="opportunityWaitList"></div></details>
+<details class="opportunity-wait-wrap"><summary>نمادهای مسدود یا فاقد شرط سخت <span id="opportunityBlockedSummary">۰ مورد</span></summary><div class="opportunity-grid compact" id="opportunityBlockedList"></div></details>
+<div class="opportunity-foot">«امتیاز فرصت» ابزار رتبه‌بندی است و احتمال برد نیست. آماده بررسی ورود به معنی ارسال سفارش نیست؛ سامانه فقط تصمیم‌یار است و سفارش خودکار ثبت نمی‌کند.</div>
+</section>
+<details id="watchlistPanel" class="watchlist-disclosure"><summary class="watchlist-summary"><b>⭐ واچ‌لیست شخصی</b><span class="badge-count" id="watchlistCount">۰ ارز</span><small>برای مشاهده و مدیریت نمادها باز کنید</small></summary><div class="watchlist-content">
+<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>مدیریت نمادهای منتخب</b><div style="font-size:.72rem;color:var(--text3);margin-top:4px">نامزدهای خام و واجد شرایط پایش اولیه و ارزهای در انتظار ماشه را جداگانه اضافه کنید؛ هیچ‌یک به‌تنهایی سیگنال خرید نیستند.</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="refresh-btn" id="addEarlyBtn" type="button">＋ افزودن نامزدهای خام</button><button class="refresh-btn" id="addEarlyQualifiedBtn" type="button">＋ افزودن نامزدهای واجد شرایط</button><button class="refresh-btn" id="addAwaitBtn" type="button">＋ افزودن نتایج فیلتر «منتظر ماشه»</button><button class="refresh-btn" id="exportWatchlistBtn" type="button">⇩ خروجی CSV</button><button class="refresh-btn" id="clearWatchlistBtn" type="button">پاک‌کردن واچ‌لیست</button></div></div>
+<div class="watchlist-manual-add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+<label for="watchManualSymbol" style="flex:1;min-width:180px">افزودن دستی بازار تتری فعال <input autocapitalize="characters" autocomplete="off" id="watchManualSymbol" inputmode="text" maxlength="28" placeholder="مثلاً BTC یا BTCUSDT" style="width:100%;margin-top:5px" type="text"/></label>
+<button class="refresh-btn" id="watchManualAddBtn" type="button">＋ افزودن نماد</button>
+<button class="refresh-btn" id="watchAddFilteredBtn" type="button">＋ افزودن همه نتایج فیلتر</button>
+</div>
+<div class="table-wrapper" style="margin-top:10px"><table><thead><tr><th>ارز</th><th>Snapshot</th><th>وضعیت فعلی</th><th>روند / کیفیت</th><th>ورود</th><th>هدف</th><th>حد ضرر</th><th>R/R خالص</th><th>آخرین بررسی</th><th>عملیات</th></tr></thead><tbody id="watchlistBody"><tr><td colspan="10">در حال بارگذاری واچ‌لیست ذخیره‌شده…</td></tr></tbody></table></div><div style="font-size:.7rem;color:var(--text3);margin-top:8px">واچ‌لیست فقط در همین مرورگر ذخیره می‌شود. سفارش‌گذاری یا اتصال حساب نوبیتکس انجام نمی‌شود.</div></div></details>
+<section aria-live="polite" class="opportunity-panel monitor-candidates-panel" id="monitorCandidatesPanel">
+<details class="monitor-collapse" id="monitorCandidatesDetails">
+<summary>
+<div class="monitor-summary-text">
+<b>👀 نامزدهای پایش (مستقل از فیلتر و واچ‌لیست)</b>
+<small>نامزدهای خام، واجد شرایط و نمادهای در صف پایش ۱۵m/۵m؛ این فهرست به‌معنای توصیه خرید نیست.</small>
+</div>
+<div class="opportunity-counts"><span id="monitorRawCount">نامزد خام: ۰</span><span id="monitorQualifiedCount">نامزد واجد شرایط: ۰</span><span id="monitorActiveCount">پایش ۵m/۱۵m: ۰</span><span id="monitorTriggerCount">دروازه ورود: ۰</span></div>
+</summary>
+<div class="monitor-collapse-body">
+<p class="monitor-summary-description">نامزدهای دارای داده معتبر و الگوی بالقوه، حتی پیش از تأیید R/R یا هزینه‌ها، در صف ۱۵m/۵m قرار می‌گیرند. این پایش صرفاً رصد است و شروط نهایی ورود را دور نمی‌زند.</p>
+<div class="opportunity-grid" id="monitorCandidateList"><div class="opportunity-empty">پس از تکمیل تحلیل نمادهای بازار، نامزدهای پایش مستقل از فیلترهای صفحه و واچ‌لیست نمایش داده می‌شوند.</div></div>
+<div class="opportunity-foot">تمام موانع سخت و نرم هر نامزد در کارت آن قابل مشاهده است. نمادهای این بخش با فرصت‌های ورود تأییدشده اشتباه گرفته نشوند.</div>
+</div>
+</details>
+</section>
+
+<details class="ux-disclosure nbx-api-disclosure"><summary>🔐 اتصال اختیاری حساب نوبیتکس · فقط خواندنی (READ ONLY)</summary><section aria-label="اتصال خواندنی حساب نوبیتکس" id="nbxApiPanel">
 <div class="nbxApiHead">
 <div>
 <div class="nbxApiTitle">🔐 اتصال امن به حساب نوبیتکس <span style="color:#72dfaa;font-size:.7rem">(READ ONLY)</span></div>
@@ -539,7 +610,7 @@ small,.muted,.text-muted{font-size:max(.69rem,inherit)}
 <button class="nbxApiBtn secondary" disabled="" id="nbxApiRefreshBtn" type="button">بروزرسانی موجودی</button>
 </div>
 <div aria-live="polite" id="nbxWalletSummary"></div>
-</section>
+</section></details>
 <div class="filters">
 <label>🔎 جستجو:<input id="searchInput" placeholder="BTC, ETH..." style="width:120px;" type="text"/></label>
 <label>🔍 فیلتر روند:
@@ -575,46 +646,15 @@ small,.muted,.text-muted{font-size:max(.69rem,inherit)}
 <label><input id="hideStable" type="checkbox"/> مخفی استیبل</label>
 <span style="font-size:0.7rem;color:var(--text3);">نمایش: <span id="visibleCount">۰</span> ارز</span>
 <button id="mobFilterBtn" type="button">🎛 فیلترهای بیشتر</button></div>
-<section id="watchlistPanel" style="margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);">
-<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>⭐ واچ‌لیست ماشه ورود</b> <span class="badge-count" id="watchlistCount">۰ ارز</span><div style="font-size:.72rem;color:var(--text3);margin-top:4px">نامزدهای خام و واجد شرایط پایش اولیه و ارزهای در انتظار ماشه را جداگانه اضافه کنید؛ هیچ‌یک به‌تنهایی سیگنال خرید نیستند.</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="refresh-btn" id="addEarlyBtn" type="button">＋ افزودن نامزدهای خام</button><button class="refresh-btn" id="addEarlyQualifiedBtn" type="button">＋ افزودن نامزدهای واجد شرایط</button><button class="refresh-btn" id="addAwaitBtn" type="button">＋ افزودن نتایج فیلتر «منتظر ماشه»</button><button class="refresh-btn" id="exportWatchlistBtn" type="button">⇩ خروجی CSV</button><button class="refresh-btn" id="clearWatchlistBtn" type="button">پاک‌کردن واچ‌لیست</button></div></div>
-<div class="watchlist-manual-add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
-<label for="watchManualSymbol" style="flex:1;min-width:180px">افزودن دستی بازار تتری فعال <input autocapitalize="characters" autocomplete="off" id="watchManualSymbol" inputmode="text" maxlength="28" placeholder="مثلاً BTC یا BTCUSDT" style="width:100%;margin-top:5px" type="text"/></label>
-<button class="refresh-btn" id="watchManualAddBtn" type="button">＋ افزودن نماد</button>
-<button class="refresh-btn" id="watchAddFilteredBtn" type="button">＋ افزودن همه نتایج فیلتر</button>
-</div>
-<div class="table-wrapper" style="margin-top:10px"><table><thead><tr><th>ارز</th><th>Snapshot</th><th>وضعیت فعلی</th><th>روند / کیفیت</th><th>ورود</th><th>هدف</th><th>حد ضرر</th><th>R/R خالص</th><th>آخرین بررسی</th><th>عملیات</th></tr></thead><tbody id="watchlistBody"><tr><td colspan="10">در حال بارگذاری واچ‌لیست ذخیره‌شده…</td></tr></tbody></table></div><div style="font-size:.7rem;color:var(--text3);margin-top:8px">واچ‌لیست فقط در همین مرورگر ذخیره می‌شود. سفارش‌گذاری یا اتصال حساب نوبیتکس انجام نمی‌شود.</div></section>
-<section aria-live="polite" class="opportunity-panel monitor-candidates-panel" id="monitorCandidatesPanel">
-<details class="monitor-collapse" id="monitorCandidatesDetails">
-<summary>
-<div class="monitor-summary-text">
-<b>👀 نامزدهای پایش (مستقل از فیلتر و واچ‌لیست)</b>
-<small>نامزدهای خام، واجد شرایط و نمادهای رسیده به مرحله ماشه؛ این فهرست به‌معنای توصیه خرید نیست.</small>
-</div>
-<div class="opportunity-counts"><span id="monitorRawCount">نامزد خام: ۰</span><span id="monitorQualifiedCount">نامزد واجد شرایط: ۰</span><span id="monitorTriggerCount">در مرحله ماشه: ۰</span></div>
-</summary>
-<div class="monitor-collapse-body">
-<p class="monitor-summary-description">داده ۱۵ و ۵ دقیقه‌ای در اسکن خودکار فقط پس از عبور از شروط پایه درخواست می‌شود.</p>
-<div class="opportunity-grid" id="monitorCandidateList"><div class="opportunity-empty">پس از تکمیل تحلیل نمادهای بازار، نامزدهای پایش مستقل از فیلترهای صفحه و واچ‌لیست نمایش داده می‌شوند.</div></div>
-<div class="opportunity-foot">تمام موانع سخت و نرم هر نامزد در کارت آن قابل مشاهده است. نمادهای این بخش با فرصت‌های ورود تأییدشده اشتباه گرفته نشوند.</div>
-</div>
-</details>
-</section>
-<section aria-live="polite" class="opportunity-panel" id="entryOpportunityPanel">
-<div class="opportunity-head">
-<div><b>🎯 فرصت‌های ورود تأییدشده (جدا از نامزدهای پایش)</b><p>تمام نمادهای بازار اسکن می‌شوند؛ فیلترهای صفحه و واچ‌لیست شخصی در شناسایی این فرصت‌ها دخالت ندارند. ورود فقط پس از تأیید روند ۱ساعته/۴ساعته، زمینه ۱۵دقیقه و ماشه کندل بسته‌شده ۵دقیقه‌ای نمایش داده می‌شود.</p></div>
-<div class="opportunity-counts"><span id="opReadyCount">ورود تأییدشده: ۰</span><span id="opWaitCount">در انتظار: ۰</span><span id="opScannedCount">بررسی‌شده: ۰</span></div>
-</div>
-<div class="opportunity-subtitle">فرصت‌های دارای تمام شروط ورود</div>
-<div class="opportunity-grid" id="opportunityReadyList"><div class="opportunity-empty">هنوز فرصت ورود کاملاً تأییدشده‌ای شناسایی نشده است. موتور فرصت‌یابی پس از تکمیل داده هر نماد، مستقل از فیلترهای شما آن را بررسی می‌کند.</div></div>
-<details class="opportunity-wait-wrap"><summary>نمادهای در انتظار تکمیل شروط <span id="opportunityWaitSummary">۰ مورد</span></summary><div class="opportunity-grid compact" id="opportunityWaitList"></div></details>
-<div class="opportunity-foot">این بخش سیگنال‌های تأییدشده را از واچ‌لیست و فیلترهای دستی جدا می‌کند. قیمت‌ها بر اساس داده نوبیتکس و آخرین کندل بسته محاسبه می‌شوند؛ قبل از سفارش واقعی، قیمت لحظه‌ای و حد ضرر را دوباره کنترل کنید. برنامه سفارش خودکار ثبت نمی‌کند.</div>
-</section>
-<section class="backtest-panel portfolio-backtest-panel" aria-label="بک‌تست چندنمادی">
+
+
+
+<details class="ux-disclosure backtest-disclosure"><summary>آزمون تاریخی و اعتبارسنجی پرتفوی</summary><section class="backtest-panel portfolio-backtest-panel" aria-label="بک‌تست چندنمادی">
   <h3>اعتبارسنجی چندنمادی روی تاریخچه محلی</h3>
   <p class="backtest-note">حداکثر ۱۲ نماد دارای داده ذخیره‌شده؛ محاسبات مرحله‌ای و بدون توقف رابط. نتایج به طول و کیفیت کش همین دستگاه محدود است.</p>
   <div class="v4-actions"><button id="portfolioBacktestBtn" class="refresh-btn" type="button">اجرای بک‌تست پرتفوی چندنمادی</button></div>
   <div id="portfolioBacktestResults" aria-live="polite"></div>
-</section>
+</section></details>
 <div class="analysis-status" id="analysisStatus"><span>موتور Swing چندتایم‌فریمی ۴ساعته/۱ساعته</span><span>در انتظار دریافت داده بازار و آغاز اسکن...</span></div>
 <div class="error-bar" id="errorBar"></div>
 <div class="table-wrapper">
@@ -649,7 +689,7 @@ small,.muted,.text-muted{font-size:max(.69rem,inherit)}
 </table>
 </div>
 </div>
-<div class="footer">نسخه ۷٫۶٫۰: تحلیل ریسک از یک Snapshot شناسه‌دار تغذیه می‌شود؛ داده نمونه یا سیگنال قطعی از پیش‌نوشته‌شده نمایش داده نمی‌شود. امتیاز همگرایی احتمال برد نیست و برنامه سفارش ثبت نمی‌کند.<br/>در وب، اجرای پس‌زمینه به بازماندن تب و سیاست مرورگر وابسته است. زمان‌ها در جزئیات با منطقه تهران و UTC گزارش می‌شوند.<br/><a href="https://www.tradingview.com/" rel="noreferrer" target="_blank">TradingView Lightweight Charts™ 4.2.3</a> • Copyright (c) 2024 TradingView, Inc.</div>
+<div class="footer">نسخه ۷٫۷٫۱: موتور چهاراستراتژی، رتبه‌بندی فرصت و گزارش شفاف موانع؛ محاسبه ریسک از Snapshot شناسه‌دار تغذیه می‌شود. امتیاز همگرایی احتمال برد نیست و برنامه سفارش ثبت نمی‌کند.<br/>در وب، اجرای پس‌زمینه به بازماندن تب و سیاست مرورگر وابسته است. زمان‌ها در جزئیات با منطقه تهران و UTC گزارش می‌شوند.<br/><a href="https://www.tradingview.com/" rel="noreferrer" target="_blank">TradingView Lightweight Charts™ 4.2.3</a> • Copyright (c) 2024 TradingView, Inc.</div>
 </div>
 <div aria-labelledby="modalTitle" aria-modal="true" class="modal-overlay" id="detailModal" role="dialog">
 <div class="modal-box">

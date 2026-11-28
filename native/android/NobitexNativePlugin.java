@@ -293,7 +293,7 @@ public class NobitexNativePlugin extends Plugin {
                 connection.setUseCaches(false);
                 connection.setDoInput(true);
                 connection.setRequestProperty("Accept", "application/json");
-                connection.setRequestProperty("User-Agent", "NobitexScanner/7.6.0 Android");
+                connection.setRequestProperty("User-Agent", "NobitexScanner/7.7.1 Android");
                 connection.setRequestProperty("Nobitex-Key", publicKeyText);
                 connection.setRequestProperty("Nobitex-Timestamp", timestamp);
                 connection.setRequestProperty("Nobitex-Signature", signatureText);

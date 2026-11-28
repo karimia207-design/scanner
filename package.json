@@ -1,13 +1,13 @@
 {
   "name": "nobitex-scanner-android",
-  "version": "7.6.0",
+  "version": "7.7.1",
   "private": true,
-  "description": "Capacitor Android wrapper for Nobitex scanner v7.6.0",
+  "description": "Capacitor Android wrapper for Nobitex multi-strategy scanner v7.7.1",
   "scripts": {
     "build:web": "node scripts/build-web.mjs",
     "android:prepare": "node scripts/prepare-android.mjs",
     "android:build": "npm run android:prepare && cd android && ./gradlew --no-daemon assembleDebug",
-    "validate": "node scripts/validate-build.mjs && node scripts/test-indicators.mjs && node scripts/test-indicator-reference-vectors.mjs",
+    "validate": "node scripts/validate-release.mjs && node scripts/test-indicators.mjs && node scripts/test-indicator-reference-vectors.mjs && node scripts/test-opportunity-engine.mjs && node scripts/test-opportunity-history.mjs && node scripts/test-surveillance-engine.mjs",
     "test:indicators": "node scripts/test-indicators.mjs",
     "test:references": "node scripts/test-indicator-reference-vectors.mjs",
     "android:release": "npm run android:prepare && cd android && ./gradlew --no-daemon --stacktrace assembleRelease"

@@ -77,11 +77,15 @@ let opportunityRefreshTimer = null;
 // Monitor snapshots use fresh market quotes plus cached 1h/4h candles; they do not generate OHLC requests.
 const monitorPulseMap = new Map();
 const monitorDiagnosticAt = new Map();
-let triggerProbeBusy = false;
+const triggerMonitorLastAt = new Map();
+let triggerMonitorBusy = false;
 let dailyMonitorBusy = false;
 let nextDailyMonitorAt = 0;
-const TRIGGER_PROBE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
-const MONITOR_REFRESH_MS = 30000; // quote-only monitoring; no OHLC call
+const MONITOR_REFRESH_MS = 30000; // quote-only snapshots and dashboard refresh
+const TRIGGER_MONITOR_REFRESH_MS = 4000; // one serial queue slot per pass; shared OHLC throttle remains authoritative
+const TRIGGER_MONITOR_SYMBOL_COOLDOWN_MS = 45000; // per-symbol guard; timeframe freshness remains authoritative
+const STRICT_TRIGGER_FETCH_PRIORITY = 16; // after primary 1H/4H tiers, before low-priority universe tail
+const TRIGGER_MONITOR_FETCH_PRIORITY = 12; // after strict triggers, before low-priority universe tail
 const MONITOR_DIAGNOSTIC_MS = 5 * 60 * 1000;
 const MAX_BACKGROUND_TRIGGER_JOBS = 1;
 const DAILY_MONITOR_COOLDOWN_MS = 5 * 60 * 1000;
@@ -239,7 +243,7 @@ const notif={enabled:false,soundEnabled:false,audioCtx:null,
  disable(){this.enabled=false;},
  async enableSound(){try{this.audioCtx??=new(window.AudioContext||window.webkitAudioContext)();await this.audioCtx.resume();this.soundEnabled=true;return true}catch(e){eventLog('فعال‌سازی صدا ناموفق بود: '+e.message);return false}},
  beep(type='buy',test=false){if(!this.audioCtx||(!this.soundEnabled&&!test))return;try{const ctx=this.audioCtx,now=ctx.currentTime,osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.type='sine';osc.frequency.setValueAtTime(type==='buy'?660:440,now);osc.frequency.setValueAtTime(type==='buy'?880:330,now+.12);gain.gain.setValueAtTime(.001,now);gain.gain.exponentialRampToValueAtTime(.06,now+.02);gain.gain.exponentialRampToValueAtTime(.001,now+.4);osc.start(now);osc.stop(now+.45)}catch(e){eventLog('پخش صدا مسدود شد','info')}},
- async notify(title,body,tag,type){if(this.enabled&&window.NobitexNativeBridge?.isAndroid&&window.NobitexNativeBridge.notifyEntry){try{await window.NobitexNativeBridge.notifyEntry({title,body,tag});if(this.soundEnabled)this.beep(type);return}catch(e){eventLog('اعلان بومی ارسال نشد','info')}}const LN=window.Capacitor?.Plugins?.LocalNotifications;if(this.enabled&&LN){try{await LN.schedule({notifications:[{id:Math.floor(Date.now()%2147483000),title,body}]})}catch(e){eventLog('اعلان بومی ارسال نشد','info')}if(this.soundEnabled)this.beep(type);return}if(this.enabled&&'Notification'in window&&Notification.permission==='granted'){try{const n=new Notification(title,{body,tag,silent:false,requireInteraction:true});n.onclick=()=>{window.focus();n.close()}}catch(e){eventLog('اعلان مرورگر ساخته نشد','info')}}if(this.soundEnabled)this.beep(type)}
+ async notify(title,body,tag,type){if(this.enabled&&window.NobitexNativeBridge?.isAndroid&&window.NobitexNativeBridge.notifyEntry){try{await window.NobitexNativeBridge.notifyEntry({title,body,tag});if(this.soundEnabled)this.beep(type);return}catch(e){eventLog('اعلان بومی ارسال نشد','info')}}const LN=window.Capacitor?.Plugins?.LocalNotifications;if(this.enabled&&LN){try{await LN.schedule({notifications:[{id:Math.floor(Date.now()%2147483000),title,body}]})}catch(e){eventLog('اعلان بومی ارسال نشد','info')}if(this.soundEnabled)this.beep(type);return}if(this.enabled&&'Notification'in window&&Notification.permission==='granted'){try{if(window.NobitexPWA?.showNotification){await window.NobitexPWA.showNotification(title,body,tag,type)}else if('serviceWorker'in navigator&&navigator.serviceWorker.controller){const reg=await navigator.serviceWorker.ready;await reg.showNotification(String(title),{body:String(body||''),tag:String(tag||'nobitex-'+Date.now()),icon:'./icon.svg',badge:'./icon.svg',requireInteraction:true,renotify:false,vibrate:type==='buy'?[250,120,250,120,350]:[180,100,180],data:{url:'./index.html'}})}else{const n=new Notification(title,{body,tag,silent:false,requireInteraction:true});n.onclick=()=>{window.focus();n.close()}}}catch(e){eventLog('اعلان مرورگر ساخته نشد','info')}}if(this.soundEnabled)this.beep(type)}
 };
 
 // =========================================================
@@ -293,7 +297,7 @@ async function fetchNobitexMarketStats(){const data=await apiReq('nobitex','/mar
 async function fetchTopCoins(){if(!prefs.useCoinGecko){diag.coingecko='غیرفعال؛ فهرست با حجم تتری';return null}const cached=await dbGet('meta','cgList');if(cached?.list&&Date.now()-cached.ts<CG_TTL_MS){diag.coingecko='✓ کش';return cached.list}try{const data=await apiReq('coingecko',`/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${TOP_LIMIT}&page=1&sparkline=false`,{priority:-1,key:'cg:rank'});if(!Array.isArray(data))throw new Error('رتبه‌بندی نامعتبر است');const list=data.map((c,i)=>({id:String(c.id),rank:c.market_cap_rank||i+1,symbol:String(c.symbol||'').toUpperCase(),name:String(c.name||c.symbol),marketCap:num(c.market_cap)}));await dbPut('meta',{key:'cgList',list,ts:Date.now()});return list}catch(e){diag.coingecko=cached?'کش قدیمی':'ناموفق؛ فهرست با حجم';return cached?.list||null}}
 
 function coinFromMarketStat(s,rank=1,name=null){return{id:'nobitex:'+s.symbol,rank,symbol:s.base,name:name||s.base,marketRank:null,rankSource:'افزوده‌شده از بازار فعال نوبیتکس',price:s.lastPrice,dayOpen:s.dayOpen,change24h:s.change24h,volume:s.volumeQuote,high24h:s.high,low24h:s.low,bestBid:s.bestBid,bestAsk:s.bestAsk,nobitexSymbol:s.symbol,quoteAt:s.quoteAt||0,priceAt:s.priceAt||0}}
-function buildUniverse(globalCoins,stats){const bySymbol=new Map(),duplicates=new Set();for(const c of globalCoins||[]){if(bySymbol.has(c.symbol))duplicates.add(c.symbol);else bySymbol.set(c.symbol,c)}const ranked=[...stats.values()].filter(s=>!s.isClosed&&s.lastPrice>0&&s.volumeQuote>0).sort((a,b)=>{const ga=duplicates.has(a.base)?null:bySymbol.get(a.base),gb=duplicates.has(b.base)?null:bySymbol.get(b.base);return (ga?.rank??Infinity)-(gb?.rank??Infinity)||b.volumeQuote-a.volumeQuote}).slice(0,TOP_LIMIT);return ranked.map((s,i)=>{const g=duplicates.has(s.base)?null:bySymbol.get(s.base);return{...coinFromMarketStat(s,i+1,g?.name||null),marketRank:g?.rank||null,rankSource:g?'رتبه جهانی؛ تکمیل با حجم':'حجم تتری نوبیتکس'}})}
+function buildUniverse(globalCoins,stats){const bySymbol=new Map(),duplicates=new Set();for(const c of globalCoins||[]){if(bySymbol.has(c.symbol))duplicates.add(c.symbol);else bySymbol.set(c.symbol,c)}const ranked=[...stats.values()].filter(s=>!s.isClosed&&s.lastPrice>0&&s.volumeQuote>0).sort((a,b)=>{const sa=(Number.isFinite(a.bestAsk)&&Number.isFinite(a.bestBid)&&a.bestAsk>=a.bestBid)?(a.bestAsk-a.bestBid)/((a.bestAsk+a.bestBid)/2):1;const sb=(Number.isFinite(b.bestAsk)&&Number.isFinite(b.bestBid)&&b.bestAsk>=b.bestBid)?(b.bestAsk-b.bestBid)/((b.bestAsk+b.bestBid)/2):1;const qa=Math.log1p(a.volumeQuote)*1.0-Math.min(sa,0.05)*180;const qb=Math.log1p(b.volumeQuote)*1.0-Math.min(sb,0.05)*180;return qb-qa||b.volumeQuote-a.volumeQuote}).slice(0,TOP_LIMIT);return ranked.map((s,i)=>{const g=duplicates.has(s.base)?null:bySymbol.get(s.base);return{...coinFromMarketStat(s,i+1,g?.name||null),marketRank:g?.rank||null,rankSource:'اولویت نقدشوندگی بازار نوبیتکس؛ رتبه جهانی تکمیلی'}})}
 function augmentUniverseWithWatchlist(baseList,stats){const out=baseList.slice(),seen=new Set(out.map(c=>c.nobitexSymbol));for(const item of watchlist){const symbol=String(item.symbol||'').toUpperCase();if(seen.has(symbol))continue;const stat=stats.get(symbol.replace(/USDT$/,''));if(!stat||stat.isClosed||!(stat.lastPrice>0&&stat.volumeQuote>0))continue;out.push(coinFromMarketStat(stat,out.length+1,item.name||item.base));seen.add(symbol);}return out;}
 
 // =========================================================
@@ -704,7 +708,7 @@ const diagnosticMemory=new Map();
 const DIAGNOSTIC_LIMIT=1200;
 function beginDiagnosticRun(){
   diagnosticRunId='scan-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
-  const row={key:diagnosticRunId,runId:diagnosticRunId,at:Date.now(),appVersion:'7.6.0',universeSize:allCoins.length,source:'local'};
+  const row={key:diagnosticRunId,runId:diagnosticRunId,at:Date.now(),appVersion:'7.7.1',universeSize:allCoins.length,source:'local'};
   dbPut('scan_runs',row).catch(error=>eventLog('ثبت تاریخچه اجرای اسکن ناموفق بود: '+String(error?.message||error).slice(0,120),'info'));
   return diagnosticRunId;
 }
@@ -749,7 +753,8 @@ function recordDiagnosticSnapshot(coin,record){
     const triggerAssessment=computeEntryOpportunity(coin,record),triggerStage=triggerAssessment.baseReady===true;
     const q15=tfMap['15m']?timeframeQualitySnapshot(tfMap,'15m',true):null,q5=tfMap['5m']?timeframeQualitySnapshot(tfMap,'5m',true):null;
     const triggerProbeSample=record?.triggerProbe?.sampled===true;
-    const triggerDataStatus=triggerStage?(q15?.valid&&q5?.valid?'valid':([q15,q5].some(x=>x&&(x.status==='network_error'||x.status==='stale'))?'fetch_or_stale_error':(!tfMap['15m']||!tfMap['5m']||q15?.status==='not_loaded'||q5?.status==='not_loaded'?'pending':'quality_rejected'))):triggerProbeSample?(q15?.valid&&q5?.valid?'diagnostic_sample_valid':([q15,q5].some(x=>x&&(x.status==='network_error'||x.status==='stale'))?'diagnostic_sample_error':'diagnostic_sample_quality_rejected')):'not_eligible';
+    const triggerMonitorActive=record?.triggerMonitoring?.active===true;
+    const triggerDataStatus=triggerStage?(q15?.valid&&q5?.valid?'valid':([q15,q5].some(x=>x&&(x.status==='network_error'||x.status==='stale'))?'fetch_or_stale_error':(!tfMap['15m']||!tfMap['5m']||q15?.status==='not_loaded'||q5?.status==='not_loaded'?'pending':'quality_rejected'))):triggerMonitorActive?(q15?.valid&&q5?.valid?'monitoring_valid':([q15,q5].some(x=>x&&(x.status==='network_error'||x.status==='stale'))?'monitoring_fetch_error':(!tfMap['15m']||!tfMap['5m']||q15?.status==='not_loaded'||q5?.status==='not_loaded'?'monitoring_pending':'monitoring_quality_rejected'))):triggerProbeSample?(q15?.valid&&q5?.valid?'diagnostic_sample_valid':([q15,q5].some(x=>x&&(x.status==='network_error'||x.status==='stale'))?'diagnostic_sample_error':'diagnostic_sample_quality_rejected')):'not_eligible';
     const valid1h=q1.valid,valid4h=q4.valid,valid1d=q1d.valid;
     const firstHardBlock=events.find(x=>x.hard&&(!x.known||!x.passed));
     const firstSoftFailure=events.find(x=>!x.hard&&x.known&&!x.passed);
@@ -758,14 +763,18 @@ function recordDiagnosticSnapshot(coin,record){
     const hardBlockers=events.filter(x=>x.hard&&(!x.known||!x.passed)).map(x=>x.gateId);
     const dataStatus=valid1h&&valid4h?'valid':(!tfMap['1h']||!tfMap['4h'])?'not_loaded':([q1,q4].some(x=>x.status==='network_error'||x.status==='stale')?'fetch_or_stale_error':'quality_rejected');
     const rrStatus=!r?'risk_calculation_unavailable':Number.isFinite(r.rrNet)?(r.rrNet>=prefs.minRR?'valid':'below_minimum'):'no_valid_target';
-    const row={key:runId+'|'+coin.nobitexSymbol+'|'+(record?.snapshotId||'legacy'),runId,symbol:coin.nobitexSymbol,base:coin.symbol,at:Date.now(),appVersion:'7.6.0',snapshotId:record?.snapshotId||null,snapshotMeta:record?.snapshotMeta||null,
+    const row={key:runId+'|'+coin.nobitexSymbol+'|'+(record?.snapshotId||'legacy'),runId,symbol:coin.nobitexSymbol,base:coin.symbol,at:Date.now(),appVersion:'7.7.1',snapshotId:record?.snapshotId||null,snapshotMeta:record?.snapshotMeta||null,
       quoteAt:coin.quoteAt||0,quoteAgeMs:coin.quoteAt?Math.max(0,Date.now()-coin.quoteAt):null,
       monitorPrice:coin.bestAsk>0?coin.bestAsk:coin.price,monitorBid:coin.bestBid||null,monitorAsk:coin.bestAsk||null,
       monitorSpread:r?.spread??null,monitorVolume24h:coin.volume??null,monitorSupportDistancePct:monitorPulseMap.get(coin.id)?.snap?.supportDistancePct??null,monitorResistanceRoomPct:monitorPulseMap.get(coin.id)?.snap?.resistanceRoomPct??null,monitorObservedAt:monitorPulseMap.get(coin.id)?.snap?.at??null,marketQuoteObservedAt:Date.now(),
       candle1h:tfMap['1h']?.lastTime||null,candle4h:tfMap['4h']?.lastTime||null,
       valid1h,valid4h,dataStatus,quality1h:q1,quality4h:q4,quality1d:q1d,
-      triggerStage,triggerProbeSample,triggerProbeAt:record?.triggerProbe?.at??null,triggerProbeStatus:record?.triggerProbe?.status??null,
+      triggerStage,triggerMonitorActive,triggerMonitorAt:record?.triggerMonitoring?.at??null,triggerMonitorStatus:record?.triggerMonitoring?.status??null,triggerProbeSample,triggerProbeAt:record?.triggerProbe?.at??null,triggerProbeStatus:record?.triggerProbe?.status??null,
       triggerDataStatus,valid15m:q15?.valid??null,valid5m:q5?.valid??null,quality15m:q15,quality5m:q5,
+      opportunityState:triggerAssessment.state||'pending',strategyCandidate:triggerAssessment.strategyCandidate===true,surveillanceEligible:triggerAssessment.surveillanceEligible===true,executionEligible:triggerAssessment.executionEligible===true,baseReady:triggerAssessment.baseReady===true,technicalEntryTriggerDetected:triggerAssessment.technicalTriggerReady===true,entryTriggerConditionsMet:triggerAssessment.triggerReady===true,entryTriggerStableConfirmed:opportunityState.get(coin.id)?.triggerReady===true,
+      opportunityScore:triggerAssessment.opportunityScore??null,tradeabilityScore:triggerAssessment.tradeabilityScore??null,rankingScore:triggerAssessment.rankingScore??null,tradeabilityReasons:triggerAssessment.tradeability?.reasons||[],surveillanceReasons:triggerAssessment.surveillanceReasons||[],executionBlockers:triggerAssessment.executionBlockers||[],strategyId:triggerAssessment.strategyId||null,strategy:triggerAssessment.strategy||null,
+      candidateStrategies:(triggerAssessment.discovery?.modes||[]).map(x=>({id:x.id,label:x.label,score:x.score})),
+      opportunityReasons:triggerAssessment.reasons||[],triggerLevel:triggerAssessment.triggerLevel??null,entryLow:triggerAssessment.entryLow??null,entryHigh:triggerAssessment.entryHigh??null,
       dailyStatus:q1d.status,dailyRequired:false,
       trend1h:tfMap['1h']?.trendScore??null,trend4h:tfMap['4h']?.trendScore??null,
       finalStatus:record?.mtf?.signalKey||'unknown',monitorKey:record?.mtf?.monitorKey||null,
@@ -809,7 +818,7 @@ function showDiagnostics(){
   const readyCount=items.filter(x=>x.row?.finalStatus==='ready'&&x.row?.decisionStatus==='good').length;
   // Aggregate only snapshots written by this build. Older 7.x records may not
   // contain per-timeframe quality fields and must not be treated as invalid data.
-  const currentItems=items.filter(x=>x.row?.appVersion?.startsWith('7.5.')&&typeof x.row?.valid1h==='boolean'&&typeof x.row?.valid4h==='boolean');
+  const currentItems=items.filter(x=>String(x.row?.appVersion||'').startsWith('7.7.')&&typeof x.row?.valid1h==='boolean'&&typeof x.row?.valid4h==='boolean');
   const latestBySymbol=new Map();
   for(const item of currentItems){const r=item.row||{},s=r.symbol;if(!s)continue;const old=latestBySymbol.get(s);if(!old||(r.at||0)>(old.row?.at||0))latestBySymbol.set(s,item);}
   const latestRows=[...latestBySymbol.values()].map(x=>x.row);
@@ -825,6 +834,10 @@ function showDiagnostics(){
   const latestProbeRows=latestRows.filter(r=>r.triggerProbeSample===true);
   const latestProbe15Valid=latestProbeRows.filter(r=>r.valid15m===true).length,latestProbe5Valid=latestProbeRows.filter(r=>r.valid5m===true).length;
   const latestProbeBothValid=latestProbeRows.filter(r=>r.valid15m===true&&r.valid5m===true).length;
+  const latestScheduledMonitorRows=latestRows.filter(r=>r.triggerMonitorActive===true);
+  const latestScheduledMonitorValid=latestScheduledMonitorRows.filter(r=>r.valid15m===true&&r.valid5m===true).length;
+  const latestSurveillanceRows=latestRows.filter(r=>r.surveillanceEligible===true);
+  const latestExecutionEligible=latestRows.filter(r=>r.executionEligible===true);
   const latestMonitorRows=latestRows.filter(r=>Number.isFinite(r.monitorObservedAt));
   const latestProbeErrors=latestProbeRows.filter(r=>String(r.triggerProbeStatus||'').includes('error')).length;
   const gates=new Map();
@@ -838,9 +851,9 @@ function showDiagnostics(){
   const countBy=field=>{const m=new Map();for(const x of items){const k=x.row?.[field]||'ثبت‌نشده';m.set(k,(m.get(k)||0)+1);}return [...m.entries()].sort((a,b)=>b[1]-a[1]).map(([k,n])=>`<tr><td>${escapeHTML(k)}</td><td>${n}</td><td>${items.length?((n/items.length)*100).toFixed(1):'0.0'}٪</td></tr>`).join('');};
   const blockerRows=countBy('firstBlocker'),softRows=countBy('firstSoftBlocker');
   const d=document.createElement('dialog');d.className='v4-dialog';
-  d.innerHTML=`<h3>داشبورد تشخیصی فیلترها — نسخه ۷٫۶٫۰</h3><p>آمار تاریخی: ${items.length} Snapshot، ${runs} اجرای اسکن و ${symbols} نماد منحصربه‌فرد. نامزد خام پایش اولیه: ${earlyCount} Snapshot؛ نامزد واجد شرایط: ${qualifiedCount} Snapshot؛ سیگنال خرید تأییدشده: ${readyCount} Snapshot.</p><div class="dr-note"><b>وضعیت آخرین ارزیابی هر نماد (بدون شمارش تکراری):</b> داده معتبر ۱H و ۴H: ${latestValid}/${latestRows.length}؛ داده اجباری نامعتبر/دریافت‌نشده: ${latestDataInvalid}؛ مانع روند/مومنتوم: ${latestTrendBlocked}؛ هدف یا فضای سود نامعتبر/ناکافی: ${latestTargetBlocked}؛ محاسبه ریسک انجام نشده: ${latestRiskCalcUnavailable}؛ داده روزانه در این مرحله درخواست نشده: ${latestDailyNotRequested}. تایم‌فریم روزانه شرط اجباری اسکن پایه نیست. نمادهای رسیده به مرحله ماشه واقعی: ${latestTriggerRows.length}؛ داده معتبر ۱۵m: ${latestTrigger15Valid}؛ داده معتبر ۵m: ${latestTrigger5Valid}؛ هر دو معتبر: ${latestTriggerBothValid}. نمادهای دارای پایش قیمت/اسپرد/حجم/فاصله سطوح: ${latestMonitorRows.length}؛ نمونه تشخیصی مستقل: ${latestProbeRows.length} نماد؛ خطای نمونه‌برداری: ${latestProbeErrors}؛ ۱۵m معتبر: ${latestProbe15Valid}؛ ۵m معتبر: ${latestProbe5Valid}؛ هر دو معتبر: ${latestProbeBothValid}. نمونه تشخیصی به‌تنهایی مجوز ورود نیست.</div><p>عبور مستقل برای همه فیلترها محاسبه می‌شود. عبور تجمعی فقط زنجیره فیلترهای سخت را دنبال می‌کند؛ MACD فیلتر نرم است. ${legacyCount} Snapshot قدیمی کنار گذاشته شده است.</p><h4>عملکرد تک‌تک فیلترها</h4><div style="max-height:38vh;overflow:auto"><table><thead><tr><th>فیلتر</th><th>عبور مستقل</th><th>عبور تجمعی سخت</th><th>تعداد ارزیابی</th></tr></thead><tbody>${rows||'<tr><td colspan="4">هنوز Snapshot کافی ثبت نشده است.</td></tr>'}</tbody></table></div><h4>اولین مانع سخت هر نماد (Snapshot تاریخی)</h4><div style="max-height:24vh;overflow:auto"><table><thead><tr><th>مانع</th><th>تعداد</th><th>سهم</th></tr></thead><tbody>${blockerRows}</tbody></table></div><h4>اولین مانع نرم</h4><div style="max-height:20vh;overflow:auto"><table><thead><tr><th>فیلتر نرم</th><th>تعداد</th><th>سهم</th></tr></thead><tbody>${softRows}</tbody></table></div><p>برای هر نماد در خروجی JSON، وضعیت اجباری ۱H/۴H، جزئیات پوشش، تعداد کندل، شکاف، تازگی، وضعیت اختیاری ۱D، علت نامعتبر بودن هدف سود و دسته مانع ثبت می‌شود. تاریخچه محلی فقط روی همین دستگاه نگهداری می‌شود.</p><div class="v4-actions"><button type="button" id="diagExport">خروجی JSON v10</button><button type="button" id="diagClose">بستن</button></div>`;
+  d.innerHTML=`<h3>داشبورد تشخیصی فیلترها — نسخه ۷٫۷٫۱</h3><p>آمار تاریخی: ${items.length} Snapshot، ${runs} اجرای اسکن و ${symbols} نماد منحصربه‌فرد. نامزد خام پایش اولیه: ${earlyCount} Snapshot؛ نامزد واجد شرایط: ${qualifiedCount} Snapshot؛ سیگنال خرید تأییدشده: ${readyCount} Snapshot.</p><div class="dr-note"><b>وضعیت آخرین ارزیابی هر نماد (بدون شمارش تکراری):</b> داده معتبر ۱H و ۴H: ${latestValid}/${latestRows.length}؛ داده اجباری نامعتبر/دریافت‌نشده: ${latestDataInvalid}؛ مانع روند/مومنتوم: ${latestTrendBlocked}؛ هدف یا فضای سود نامعتبر/ناکافی: ${latestTargetBlocked}؛ محاسبه ریسک انجام نشده: ${latestRiskCalcUnavailable}؛ داده روزانه در این مرحله درخواست نشده: ${latestDailyNotRequested}. تایم‌فریم روزانه شرط اجباری اسکن پایه نیست. نمادهای رسیده به مرحله ماشه واقعی: ${latestTriggerRows.length}؛ داده معتبر ۱۵m: ${latestTrigger15Valid}؛ داده معتبر ۵m: ${latestTrigger5Valid}؛ هر دو معتبر: ${latestTriggerBothValid}. نمادهای دارای پایش قیمت/اسپرد/حجم/فاصله سطوح: ${latestMonitorRows.length}؛ نمادهای صف پایش زمان‌بندی‌شده ۵m/۱۵m: ${latestScheduledMonitorRows.length}؛ هر دو تایم‌فریم معتبر: ${latestScheduledMonitorValid}؛ نمونه تشخیصی قدیمی: ${latestProbeRows.length}؛ خطای نمونه قدیمی: ${latestProbeErrors}. پایش زمان‌بندی‌شده به‌تنهایی مجوز ورود نیست.</div><p>عبور مستقل برای همه فیلترها محاسبه می‌شود. عبور تجمعی فقط زنجیره فیلترهای سخت را دنبال می‌کند؛ MACD فیلتر نرم است. ${legacyCount} Snapshot قدیمی کنار گذاشته شده است.</p><h4>عملکرد تک‌تک فیلترها</h4><div style="max-height:38vh;overflow:auto"><table><thead><tr><th>فیلتر</th><th>عبور مستقل</th><th>عبور تجمعی سخت</th><th>تعداد ارزیابی</th></tr></thead><tbody>${rows||'<tr><td colspan="4">هنوز Snapshot کافی ثبت نشده است.</td></tr>'}</tbody></table></div><h4>اولین مانع سخت هر نماد (Snapshot تاریخی)</h4><div style="max-height:24vh;overflow:auto"><table><thead><tr><th>مانع</th><th>تعداد</th><th>سهم</th></tr></thead><tbody>${blockerRows}</tbody></table></div><h4>اولین مانع نرم</h4><div style="max-height:20vh;overflow:auto"><table><thead><tr><th>فیلتر نرم</th><th>تعداد</th><th>سهم</th></tr></thead><tbody>${softRows}</tbody></table></div><p>برای هر نماد در خروجی JSON، وضعیت اجباری ۱H/۴H، جزئیات پوشش، تعداد کندل، شکاف، تازگی، وضعیت اختیاری ۱D، علت نامعتبر بودن هدف سود و دسته مانع ثبت می‌شود. تاریخچه محلی فقط روی همین دستگاه نگهداری می‌شود.</p><div class="v4-actions"><button type="button" id="diagExport">خروجی JSON v13</button><button type="button" id="diagClose">بستن</button></div>`;
   document.body.append(d);d.querySelector('#diagClose').onclick=()=>d.close();
-  d.querySelector('#diagExport').onclick=()=>{const payload={format:'nobitex-v7-diagnostics',version:10,appVersion:'7.6.0',exportedAt:new Date().toISOString(),items};downloadBlob('nobitex-v7.6.0-diagnostics.json',new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}))};
+  d.querySelector('#diagExport').onclick=()=>{const payload={format:'nobitex-v7-diagnostics',version:13,appVersion:'7.7.1',exportedAt:new Date().toISOString(),items};downloadBlob('nobitex-v7.7.1-diagnostics.json',new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}))};
   d.addEventListener('close',()=>d.remove());d.showModal();
 }
 function installDiagnosticsButton(){
@@ -992,8 +1005,8 @@ function computeRisk(coin,analysis,stopTf='1h'){
 // COIN ANALYSIS — موازی
 // =========================================================
 function monitorCandidateScore(record){
-  const m=record?.mtf, h1=record?.tfMap?.['1h']?.trendScore, h4=record?.tfMap?.['4h']?.trendScore;
-  if((m?.monitorKey!=='early'&&m?.eligible!==true)||!Number.isFinite(h1)||!Number.isFinite(h4))return -Infinity;
+  const m=record?.mtf,h1=record?.tfMap?.['1h']?.trendScore,h4=record?.tfMap?.['4h']?.trendScore;
+  if(!Number.isFinite(h1)||!Number.isFinite(h4))return -Infinity;
   return Math.round(h1*.45+h4*.55);
 }
 function updateMonitorPulse(coin,op){
@@ -1021,39 +1034,41 @@ function updateMonitorPulse(coin,op){
   monitorPulseMap.set(coin.id,value);
   return value;
 }
-function triggerProbeCooldownActive(){const at=num(LS('nb5:triggerProbeAt'),0);return Date.now()-at<TRIGGER_PROBE_COOLDOWN_MS;}
-async function probeCandidateTimeframes(coin){
-  if(triggerProbeBusy||!coin||!marketHealthy||(document.hidden&&!mayRunWhenHidden())||analysisPaused||triggerProbeCooldownActive())return null;
-  const current=analysisCache.get(coin.id);if(!current||current.mtf?.monitorKey!=='early')return null;
-  const task=(async()=>{
-    triggerProbeBusy=true;
-    const startedAt=Date.now();
-    LS('nb5:triggerProbeAt',String(startedAt));
-    try{
-      let tfMap={...(current.tfMap||{})},results={};
-      for(const key of ['15m','5m']){
-        if(tfMap[key]&&!frameDue(coin,key)){results[key]=tfMap[key];continue;}
-        const res=await fetchTimeframe(coin,key,5,false);
-        const item=res.ready?analyzeTimeframe(res.candles,key,res.source):{ready:false,tf:key,trendScore:null,reversalScore:null,bearishReversalScore:null,dataQuality:res.quality?.quality??0,labels:[],candles:res.candles||[],candlesCount:(res.candles||[]).length};
-        Object.assign(item,{source:res.source,pair:res.pair,stale:res.stale,networkError:res.networkError,error:res.error,validation:res.validation,fetchedAt:res.fetchedAt,dataQualityDetail:item.dataQualityDetail||res.quality||null});
-        tfMap[key]=item;results[key]=item;
-      }
-      const q15=timeframeQualitySnapshot(tfMap,'15m',true),q5=timeframeQualitySnapshot(tfMap,'5m',true);
-      const probeStatus=q15.valid&&q5.valid?'valid':([q15,q5].some(q=>q.status==='network_error'||q.status==='stale')?'fetch_error':'quality_rejected');
-      const updated=finalizeRecord(coin,{...current,tfMap,updatedAt:Date.now(),triggerProbe:{sampled:true,at:Date.now(),status:probeStatus,source:'diagnostic-only'}});
-      analysisCache.set(coin.id,updated);recordDiagnosticSnapshot(coin,updated);
-      eventLog(`${coin.symbol}: نمونه‌برداری تشخیصی ۱۵m/۵m انجام شد (${probeStatus})؛ این آزمون مجوز ورود نیست.`,'info');
-      scheduleRender();
-      return {status:probeStatus,q15,q5};
-    }catch(e){
-      const fallback=analysisCache.get(coin.id)||current;
-      fallback.triggerProbe={sampled:true,at:Date.now(),status:'fetch_error',error:String(e.message||e),source:'diagnostic-only'};
-      analysisCache.set(coin.id,fallback);recordDiagnosticSnapshot(coin,fallback);
-      eventLog(`${coin.symbol}: نمونه‌برداری تشخیصی ۱۵m/۵m ناموفق بود؛ ${e.message}`,'info');
-      return {status:'fetch_error',error:e.message};
-    }finally{triggerProbeBusy=false;}
-  })();
-  return task;
+async function ensureMonitorTriggerFrames(coin){
+  if(triggerMonitorBusy||!coin||!marketHealthy||(document.hidden&&!mayRunWhenHidden())||analysisPaused)return null;
+  const current=analysisCache.get(coin.id);
+  if(!current)return null;const pre=computeEntryOpportunity(coin,current);if(!pre.surveillanceEligible)return null;
+  const now=Date.now(),lastAttempt=triggerMonitorLastAt.get(coin.id)||0;
+  if(now-lastAttempt<TRIGGER_MONITOR_SYMBOL_COOLDOWN_MS)return null;
+  const dueKeys=['15m','5m'].filter(key=>frameDue(coin,key));
+  if(!dueKeys.length)return null;
+  triggerMonitorLastAt.set(coin.id,now);
+  triggerMonitorBusy=true;
+  try{
+    let tfMap={...(current.tfMap||{})};
+    const requested=[];
+    for(const key of ['15m','5m']){
+      if(!dueKeys.includes(key))continue;
+      const res=await fetchTimeframe(coin,key,TRIGGER_MONITOR_FETCH_PRIORITY,false);
+      const item=res.ready?analyzeTimeframe(res.candles,key,res.source):{ready:false,tf:key,trendScore:null,reversalScore:null,bearishReversalScore:null,dataQuality:res.quality?.quality??0,labels:[],candles:res.candles||[],candlesCount:(res.candles||[]).length};
+      Object.assign(item,{source:res.source,pair:res.pair,stale:res.stale,networkError:res.networkError,error:res.error,validation:res.validation,fetchedAt:res.fetchedAt,dataQualityDetail:item.dataQualityDetail||res.quality||null});
+      tfMap[key]=item;requested.push(key);
+    }
+    const q15=timeframeQualitySnapshot(tfMap,'15m',true),q5=timeframeQualitySnapshot(tfMap,'5m',true);
+    const status=q15.valid&&q5.valid?'valid':([q15,q5].some(q=>q.status==='network_error'||q.status==='stale')?'fetch_error':'quality_rejected');
+    const triggerMonitoring={active:true,at:Date.now(),status,source:'scheduled-multi-symbol-monitor',requested};
+    const updated=finalizeRecord(coin,{...current,tfMap,updatedAt:Date.now(),triggerMonitoring});
+    analysisCache.set(coin.id,updated);publishOpportunity(coin,updated);recordDiagnosticSnapshot(coin,updated);
+    eventLog(`${coin.symbol}: پایش زمان‌بندی‌شده ۱۵m/۵m انجام شد (${requested.join(' و ')||'بدون درخواست جدید'}؛ ${status}). این پایش به‌تنهایی مجوز ورود نیست.`,'info');
+    scheduleRender();
+    return {status,q15,q5,requested};
+  }catch(e){
+    const fallback=analysisCache.get(coin.id)||current;
+    fallback.triggerMonitoring={active:true,at:Date.now(),status:'fetch_error',source:'scheduled-multi-symbol-monitor',error:String(e.message||e)};
+    analysisCache.set(coin.id,fallback);recordDiagnosticSnapshot(coin,fallback);
+    eventLog(`${coin.symbol}: پایش ۱۵m/۵m ناموفق بود؛ ${e.message}`,'info');
+    return {status:'fetch_error',error:e.message};
+  }finally{triggerMonitorBusy=false;}
 }
 async function ensureMonitorDailyFrame(coin){
   if(dailyMonitorBusy||!coin||!marketHealthy||(document.hidden&&!mayRunWhenHidden())||analysisPaused)return null;
@@ -1132,7 +1147,7 @@ const WATCH_KEY='nb4:watchlist:v1';
 function loadWatchlist(){try{const x=JSON.parse(LS(WATCH_KEY)||'[]');return Array.isArray(x)?x:[]}catch(error){eventLog('خواندن واچ‌لیست ناموفق بود: '+String(error?.message||error).slice(0,120),'info');return []}}
 let watchlist=loadWatchlist();
 function saveWatchlist(){LS(WATCH_KEY,JSON.stringify(watchlist));renderWatchlist()}
-function addAwaitCandidates(items){let added=0;for(const {coin,analysis} of items){if(analysis?.mtf?.signalKey!=='await')continue;const old=watchlist.find(x=>x.symbol===coin.nobitexSymbol);if(old){old.lastSeen=Date.now();continue;}watchlist.push({symbol:coin.nobitexSymbol,base:coin.symbol,name:coin.name,addedAt:Date.now(),lastSeen:Date.now()});added++;}saveWatchlist();eventLog(`${added} ارز به واچ‌لیست اضافه شد`,'info')}
+function addAwaitCandidates(items){let added=0;for(const {coin,analysis} of items){if(analysis?.mtf?.signalKey!=='await'||!['wait','good'].includes(computeDecision(coin,analysis).cls))continue;const old=watchlist.find(x=>x.symbol===coin.nobitexSymbol);if(old){old.lastSeen=Date.now();continue;}watchlist.push({symbol:coin.nobitexSymbol,base:coin.symbol,name:coin.name,addedAt:Date.now(),lastSeen:Date.now()});added++;}saveWatchlist();eventLog(`${added} ارز به واچ‌لیست اضافه شد`,'info')}
 function addEarlyMonitorCandidates(qualifiedOnly){const expected=qualifiedOnly?'earlyQualified':'early';if(signalFilter.value!==expected){uiAlert(`ابتدا فیلتر سیگنال را روی «${qualifiedOnly?'نامزد واجد شرایط پایش':'نامزد خام پایش اولیه'}» قرار دهید.`);return;}const q=(searchInput.value||'').trim().toLowerCase(),trend=trendFilter.value;const candidates=allCoins.map(coin=>({coin,analysis:finalizeRecord(coin,analysisCache.get(coin.id)||null)})).filter(x=>{const m=x.analysis?.mtf;if(m?.monitorKey!=='early'||(qualifiedOnly&&!m.monitorQualified)||(!qualifiedOnly&&m.monitorQualified)||(hideStable.checked&&STABLES.has(String(x.coin.symbol).toUpperCase()))||(q&&!x.coin.symbol.toLowerCase().includes(q)&&!(x.coin.name||'').toLowerCase().includes(q))||(num(minScoreInput.value,0)>0&&(m.quality??0)<num(minScoreInput.value,0))||(num(minRRInput.value,0)>0&&(x.analysis?.risk?.rrNet??0)<num(minRRInput.value,0)))return false;const target={strong_bull:'صعودی قوی',bull:'صعودی',neutral:'خنثی',bear:'نزولی',strong_bear:'نزولی قوی'}[trend];return trend==='all'||(m.label?.label||'نامشخص')===target});if(!candidates.length){uiAlert('با فیلترهای فعلی، نامزدی در این سطح پایش یافت نشد.');return;}let added=0;for(const {coin} of candidates){const old=watchlist.find(x=>x.symbol===coin.nobitexSymbol);if(old){old.lastSeen=Date.now();old.monitorTier=qualifiedOnly?'qualified':'raw';continue;}watchlist.push({symbol:coin.nobitexSymbol,base:coin.symbol,name:coin.name,addedAt:Date.now(),lastSeen:Date.now(),source:qualifiedOnly?'early-qualified':'early-raw',monitorTier:qualifiedOnly?'qualified':'raw'});added++;}saveWatchlist();eventLog(`${added} ${qualifiedOnly?'نامزد واجد شرایط':'نامزد خام'} به واچ‌لیست اضافه شد`,'info')}
 let lastRenderedFiltered=[];
 function addCoinToWatchlist(coin,source='manual'){
@@ -1160,67 +1175,227 @@ function renderWatchlist(){const body=$('watchlistBody'),count=$('watchlistCount
 function exportWatchlist(){const rows=[['Symbol','SnapshotID','Status','TrendScore','Quality','Entry','Target','StopLoss','NetRR','Updated']];for(const w of watchlist){const c=allCoins.find(x=>x.nobitexSymbol===w.symbol),a=c&&analysisCache.get(c.id),m=a?.mtf,r=a?.risk;rows.push([w.symbol,a?.snapshotId||w.snapshotId||'',m?.signal||'not analyzed',m?.trendScore??'',m?.quality??'',r?.entry??'',r?.takeProfit??'',r?.stopLoss??'',r?.rrNet??'',new Date(w.lastSeen||w.addedAt).toISOString()]);}const csv='\ufeff'+rows.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='nobitex-watchlist.csv';a.click();URL.revokeObjectURL(url)}
 
 // =========================================================
-// INDEPENDENT ENTRY OPPORTUNITY ENGINE (v7.6.0)
+// MULTI-STRATEGY OPPORTUNITY ENGINE (v7.7.1)
 // Scans the complete market universe, independent of UI filters/watchlist.
 // 1H/4H define regime; 15m confirms context; a closed 5m candle activates trigger.
 // =========================================================
+// =========================================================
+// MULTI-STRATEGY OPPORTUNITY ENGINE (v7.7.1)
+// Discovery is broader than entry permission. Global risk gates are unchanged.
+// All trigger checks use closed candles only.
+// =========================================================
+const OPPORTUNITY_STRATEGIES={
+  trend:{id:'trend',label:'ادامه روند',short:'Trend Continuation'},
+  pullback:{id:'pullback',label:'اصلاح و بازگشت',short:'Pullback'},
+  range:{id:'range',label:'برگشت از کف محدوده',short:'Range Reversal'},
+  breakout:{id:'breakout',label:'شکست و بازآزمایی',short:'Breakout & Retest'}
+};
+function clampScore(value,min=0,max=100){return Math.max(min,Math.min(max,Number.isFinite(value)?value:min));}
+function computeTradeabilityScore(coin,risk,discovery){
+  const volume=Number(coin?.volume),minVolume=Math.max(1,Number(prefs.minVolume)||10000);
+  const spread=Number(risk?.spread),maxSpread=Math.max(.0001,Number(prefs.maxSpread)||.004);
+  const rr=Number(risk?.rrNet),minRR=Math.max(1,Number(prefs.minRR)||2);
+  const room=Number.isFinite(discovery?.resistanceRoom)?discovery.resistanceRoom:Number(risk?.resistanceRoomPct);
+  const entry=Number(risk?.entry),stop=Number(risk?.stopLoss);
+  const stopPct=entry>0&&stop>0&&stop<entry?(entry-stop)/entry*100:null;
+  const volumeScore=!Number.isFinite(volume)?0:volume>=minVolume*5?20:volume>=minVolume*2?16:volume>=minVolume?12:volume>=minVolume*.5?6:0;
+  const spreadScore=!Number.isFinite(spread)?0:spread<=maxSpread*.25?20:spread<=maxSpread*.5?16:spread<=maxSpread?12:spread<=maxSpread*1.5?4:0;
+  const rrScore=!Number.isFinite(rr)?0:rr>=minRR+.5?25:rr>=minRR?22:rr>=1.5?14:rr>=1?7:0;
+  const roomScore=!Number.isFinite(room)?0:room>=3?15:room>=2?12:room>=1?8:room>.25?3:0;
+  const stopScore=!Number.isFinite(stopPct)?0:stopPct<=2?20:stopPct<=4?15:stopPct<=6?10:stopPct<=8?5:0;
+  const score=Math.round(clampScore(volumeScore+spreadScore+rrScore+roomScore+stopScore));
+  const reasons=[];
+  if(!Number.isFinite(volume)||volume<minVolume)reasons.push('حجم ۲۴ساعته به حداقل مجاز معامله نرسیده است');
+  if(!Number.isFinite(spread)||spread>maxSpread)reasons.push('اسپرد از سقف مجاز بیشتر است یا قابل محاسبه نیست');
+  if(!Number.isFinite(rr)||rr<minRR)reasons.push(`R/R خالص ${Number.isFinite(rr)?rr.toFixed(2):'نامعتبر'}؛ حداقل لازم ${minRR}`);
+  if(!Number.isFinite(room)||room<=1)reasons.push('فضای کافی تا مقاومت بعدی احراز نشده است');
+  if(Number.isFinite(stopPct)&&stopPct>8)reasons.push('فاصله حد ضرر بیش از ۸٪ است');
+  return {score,components:{volume:volumeScore,spread:spreadScore,netRR:rrScore,resistanceRoom:roomScore,stopDistance:stopScore},reasons,volume,spread,rrNet:rr,resistanceRoom:room,stopDistancePct:stopPct};
+}
+function computeSurveillanceEligibility(coin,analysis,discovery,context={}){
+  const now=Number.isFinite(context.now)?context.now:Date.now(),healthy=context.marketHealthy===true,risk=analysis?.risk;
+  const reasons=[];
+  if(!discovery?.candidate)reasons.push(discovery?.reason||'الگوی معاملاتی بالقوه شناسایی نشده است');
+  if(!healthy&&!analysis?.backtestMode)reasons.push('دریافت تازه بازار تأیید نشده است');
+  if(coin?.marketClosed)reasons.push('بازار نماد بسته است');
+  if(!Number.isFinite(coin?.quoteAt)||now-coin.quoteAt>90000)reasons.push('مظنه خرید/فروش بیش از ۹۰ ثانیه قدیمی یا نامشخص است');
+  if(analysis?.snapshotMeta?.dataCoherent!==true)reasons.push('Snapshot تایم‌فریم‌های ۱H و ۴H هم‌تراز نیست');
+  if(!risk||risk.integrity?.valid!==true)reasons.push('محاسبه ریسک یا صحت Snapshot معتبر نیست');
+  if(risk&&Number.isFinite(risk.entry)&&Number.isFinite(risk.stopLoss)&&risk.entry>0&&(risk.entry-risk.stopLoss)/risk.entry>.08)reasons.push('فاصله حد ضرر بیش از ۸٪ است؛ این نماد از صف پایش معاملاتی کنار گذاشته می‌شود');
+  return {eligible:reasons.length===0,reasons};
+}
+function computeOpportunityDiscovery(coin,record){
+  const h1=record?.tfMap?.['1h'],h4=record?.tfMap?.['4h'],risk=record?.risk;
+  if(!h1||!h4||!isTimeframeValid(h1,'1h')||!isTimeframeValid(h4,'4h'))return {candidate:false,score:0,modes:[],reason:'داده معتبر ۱H و ۴H لازم است'};
+  const m1=h1.metrics||{},m4=h4.metrics||{},entry=Number(coin?.bestAsk||coin?.price);
+  if(!(entry>0))return {candidate:false,score:0,modes:[],reason:'قیمت معتبر در دسترس نیست'};
+  const supportDistance=Number.isFinite(risk?.support)?(entry-risk.support)/entry*100:null;
+  const resistanceRoom=Number.isFinite(risk?.ceiling)?(risk.ceiling-entry)/entry*100:null;
+  const emaDistance=Number.isFinite(m1.ema20)&&m1.ema20>0?Math.abs(entry-m1.ema20)/entry*100:null;
+  const relVol=Math.max(Number(m1.volRatio)||0,Number(m4.volRatio)||0);
+  const atrPct=Number.isFinite(m1.atr)&&m1.atr>0?m1.atr/entry*100:null;
+  const spreadPct=Number.isFinite(risk?.spread)?risk.spread*100:null;
+  const volume=Number(coin?.volume)||0;
+  const trend=h1.trendScore,macro=h4.trendScore;
+  const modes=[];
+  const add=(id,ok,score,reason)=>{if(ok)modes.push({id,label:OPPORTUNITY_STRATEGIES[id].label,score:clampScore(score),reason});};
+  const bullStructure=m4.structure==='bullish'||m4.plusDI>=m4.minusDI||macro>=62;
+  add('trend',macro>=60&&trend>=52&&m1.ema9>m1.ema20&&m1.rsi>=48&&m1.rsi<=74,
+      66+(macro-60)*.35+(trend-52)*.25+(relVol>=1.2?5:0),
+      'روند ۴H/۱H و هم‌جهتی EMA برای ادامه حرکت بررسی می‌شود');
+  add('pullback',macro>=52&&trend>=42&&bullStructure&&((supportDistance!=null&&supportDistance<=2.6)||(emaDistance!=null&&emaDistance<=1.8))&&m1.lastClose>=m1.ema50*.97,
+      62+(macro-52)*.25+(supportDistance!=null&&supportDistance<=1.5?8:0)+(emaDistance!=null&&emaDistance<=1?5:0),
+      'روند میان‌مدت حفظ شده و قیمت به EMA20 یا حمایت نزدیک است');
+  add('range',m4.adx<=23&&macro>=30&&macro<=68&&supportDistance!=null&&supportDistance<=2.8&&resistanceRoom!=null&&resistanceRoom>1,
+      58+(23-m4.adx)*.55+(supportDistance<=1.5?9:0)+(macro>=40&&macro<=60?5:0),
+      'قدرت روند پایین‌تر است و قیمت در محدوده حمایت/مقاومت قرار دارد');
+  add('breakout',macro>=48&&trend>=43&&m1.rsi<78&&(relVol>=.9||m1.structure==='bullish'||h1.reversalScore>=45),
+      59+(macro-48)*.25+(trend-43)*.2+(relVol>=1.5?8:relVol>=1.2?5:0),
+      'زمینه روند و حجم برای بررسی شکست یا بازآزمایی مناسب است');
+  if(!modes.length)return {candidate:false,score:0,modes:[],supportDistance,resistanceRoom,emaDistance,relVol,atrPct,spreadPct,reason:'هیچ‌یک از چهار الگوی پایه در این Snapshot شکل نگرفته است'};
+  const structureScore=supportDistance==null?0:supportDistance<=1?20:supportDistance<=1.8?16:supportDistance<=2.8?11:4;
+  const volumeScore=relVol>=2?20:relVol>=1.5?16:relVol>=1.2?13:relVol>=1?9:relVol>=.8?5:0;
+  const liquidityScore=(volume>=prefs.minVolume*20?8:volume>=prefs.minVolume*5?6:volume>=prefs.minVolume?4:0)+(spreadPct==null?0:spreadPct<=.10?7:spreadPct<=.20?5:spreadPct<=prefs.maxSpread*100?3:0);
+  const volatilityScore=atrPct==null?0:atrPct>=.5&&atrPct<=4?10:atrPct>.2&&atrPct<=6?7:3;
+  const momentumScore=clampScore((Number(h1.reversalScore)||0)*.06+(Number(h1.trendScore)||0)*.04,0,10);
+  const modeScore=Math.max(...modes.map(x=>x.score));
+  const score=Math.round(clampScore(modeScore*.25+structureScore+volumeScore+liquidityScore+volatilityScore+momentumScore));
+  const tradeability=computeTradeabilityScore(coin,risk,{resistanceRoom});
+  const rankingScore=Math.round(clampScore(score*.55+tradeability.score*.45));
+  modes.sort((x,y)=>y.score-x.score);
+  return {candidate:true,score,opportunityScore:score,tradeabilityScore:tradeability.score,tradeability,rankingScore,modes,primary:modes[0],supportDistance,resistanceRoom,emaDistance,relVol,atrPct,spreadPct,volume};
+}
 function closedFrame(frame,key){
-  return !!frame&&frame.ready&&isTimeframeValid(frame,key)&&Array.isArray(frame.candles)&&frame.candles.length>=30;
+  if(!frame?.ready||!isTimeframeValid(frame,key)||!Array.isArray(frame.candles))return false;
+  const closed=dropOpenCandleStrict(frame.candles,key);
+  return closed.length>=30;
+}
+function assessStrategyTrigger(mode,coin,analysis,risk){
+  const f15=analysis?.tfMap?.['15m'],f5=analysis?.tfMap?.['5m'];
+  if(!closedFrame(f15,'15m')||!closedFrame(f5,'5m'))return {ready:false,missing:true,reasons:['داده معتبر و بسته‌شده ۱۵m و ۵m هنوز در دسترس نیست']};
+  const c15=dropOpenCandleStrict(f15.candles,'15m'),c5=dropOpenCandleStrict(f5.candles,'5m');
+  const m15=f15.metrics||{},m5=f5.metrics||{},last15=c15.at(-1),last5=c5.at(-1),prev5=c5.at(-2);
+  if(!last15||!last5||!prev5)return {ready:false,missing:true,reasons:['کندل بسته‌شده کافی برای ماشه ورود وجود ندارد']};
+  const now=Date.now(),fresh15=now-(last15.t+TIMEFRAMES['15m'].seconds*1000)<=2*TIMEFRAMES['15m'].seconds*1000,
+    fresh5=now-(last5.t+TIMEFRAMES['5m'].seconds*1000)<=2*TIMEFRAMES['5m'].seconds*1000;
+  const currentAsk=Number(coin.bestAsk>0?coin.bestAsk:coin.price);
+  const avgVol=c5.slice(-21,-1).reduce((sum,c)=>sum+(Number(c.v)||0),0)/Math.max(1,Math.min(20,c5.length-1));
+  const volumeRatio=avgVol>0?last5.v/avgVol:null;
+  const prevHigh3=Math.max(...c5.slice(-4,-1).map(c=>c.h));
+  const prevHigh20=Math.max(...c5.slice(-21,-1).map(c=>c.h));
+  const green5=last5.c>last5.o;
+  const rsiSeries5=rsiSeries(c5.map(c=>c.c),14),rsi5Prev=rsiSeries5.at(-2)??null;
+  const rsi5Rising=Number.isFinite(m5.rsi)&&Number.isFinite(rsi5Prev)&&m5.rsi>rsi5Prev;
+  const candle5=candleReversal(c5);
+  const breakout=Number.isFinite(prevHigh20)&&prev5.c<=prevHigh20&&last5.c>prevHigh20&&green5&&Number.isFinite(volumeRatio)&&volumeRatio>=1.15;
+  const retest=Number.isFinite(prevHigh20)&&prev5.c>prevHigh20&&last5.l<=prevHigh20*1.003&&last5.c>prevHigh20&&green5&&Number.isFinite(volumeRatio)&&volumeRatio>=.85;
+  const reasons=[];let context15=false,trigger5=false,triggerLevel=prevHigh3,setup='',entryReason='';
+  if(!fresh15)reasons.push('آخرین کندل بسته‌شده ۱۵ دقیقه‌ای تازه نیست');
+  if(!fresh5)reasons.push('آخرین کندل بسته‌شده ۵ دقیقه‌ای تازه نیست');
+  if(mode.id==='trend'){
+    context15=!!m15&&f15.trendScore>=50&&m15.ema9>m15.ema20&&m15.rsi>=50&&m15.rsi<=70&&last15.c>m15.ema20;
+    trigger5=!!m5&&m5.ema9>m5.ema20&&m5.rsi>=48&&m5.rsi<=75&&last5.c>m5.ema9&&(breakout||retest);
+    triggerLevel=prevHigh20;setup=breakout?'ادامه روند؛ شکست سقف ۲۰ کندل ۵m':retest?'ادامه روند؛ بازآزمایی سقف ۵m':'ادامه روند؛ در انتظار ماشه';
+    entryReason='تداوم روند ۴H/۱H، هم‌جهتی ۱۵m و شکست/بازآزمایی ۵m';
+    if(!context15)reasons.push('زمینه ۱۵ دقیقه‌ای صعودی نیست؛ EMA9/20، RSI و بسته‌شدن بالای EMA20 باید هم‌جهت شوند');
+    if(!trigger5)reasons.push('مومنتوم ۵ دقیقه‌ای یا شکست/بازآزمایی با حجم کافی تأیید نشده است');
+  }else if(mode.id==='pullback'){
+    context15=!!m15&&f15.trendScore>=45&&m15.rsi>=42&&m15.rsi<=68&&last15.c>=m15.ema20*.985&&(f15.reversalScore>=45||m15.ema9>=m15.ema20||rsi5Rising);
+    trigger5=!!m5&&m5.rsi>=42&&m5.rsi<=72&&green5&&(candle5.score>=55||last5.c>prevHigh3)&&Number.isFinite(volumeRatio)&&volumeRatio>=1.0;
+    triggerLevel=prevHigh3;setup='اصلاح و بازگشت؛ عبور از سقف کوتاه‌مدت ۵m';entryReason='حفظ زمینه ۴H/۱H، برگشت از EMA20/حمایت و تأیید کندل ۵m';
+    if(!context15)reasons.push('اصلاح هنوز در ۱۵ دقیقه نشانه بازگشت معتبر ندارد');
+    if(!trigger5)reasons.push('کندل بازگشتی ۵ دقیقه یا حجم نسبی لازم برای پایان اصلاح تأیید نشده است');
+  }else if(mode.id==='range'){
+    const rsi15Series=rsiSeries(c15.map(c=>c.c),14),rsi15Prev=rsi15Series.at(-2)??null;
+    const rsi15Rising=Number.isFinite(m15.rsi)&&Number.isFinite(rsi15Prev)&&m15.rsi>rsi15Prev;
+    context15=!!m15&&m15.rsi>=35&&m15.rsi<=62&&last15.c>=m15.ema20*.985&&(f15.reversalScore>=45||rsi15Rising);
+    trigger5=!!m5&&m5.rsi>=38&&m5.rsi<=66&&green5&&(candle5.score>=55||last5.c>prevHigh3)&&Number.isFinite(volumeRatio)&&volumeRatio>=.85;
+    triggerLevel=prevHigh3;setup='بازگشت از کف محدوده؛ تأیید کندل ۵m';entryReason='رژیم کم‌روند، نزدیکی به حمایت و نشانه بازگشت در ۱۵m/۵m';
+    if(!context15)reasons.push('نشانه برگشت از حمایت در تایم‌فریم ۱۵ دقیقه کافی نیست');
+    if(!trigger5)reasons.push('کندل یا مومنتوم صعودی ۵ دقیقه برای خروج از کف محدوده تأیید نشده است');
+  }else{
+    context15=!!m15&&f15.trendScore>=45&&m15.rsi>=45&&m15.rsi<=75&&last15.c>=m15.ema20*.995;
+    trigger5=breakout||retest;triggerLevel=prevHigh20;setup=breakout?'شکست سقف ۲۰ کندل ۵m با حجم':retest?'شکست و بازآزمایی سطح ۵m':'شکست/بازآزمایی تأیید نشده';entryReason='بسته‌شدن بالای مقاومت کوتاه‌مدت، افزایش حجم و حفظ سطح در بازآزمایی';
+    if(!context15)reasons.push('زمینه ۱۵ دقیقه‌ای شکست را تأیید نمی‌کند');
+    if(!trigger5)reasons.push('شکست یا بازآزمایی ۵ دقیقه با حجم نسبی کافی مشاهده نشده است');
+  }
+  if(!(Number.isFinite(triggerLevel)&&triggerLevel>0))reasons.push('سطح ماشه قابل محاسبه نیست');
+  const entryLow=Number.isFinite(triggerLevel)?triggerLevel*.997:null,entryHigh=Number.isFinite(triggerLevel)?triggerLevel*1.008:null;
+  const priceInZone=Number.isFinite(currentAsk)&&Number.isFinite(entryLow)&&Number.isFinite(entryHigh)&&currentAsk>=entryLow&&currentAsk<=entryHigh;
+  const spreadOk=Number.isFinite(risk?.spread)&&risk.spread<=prefs.maxSpread;
+  const rrOk=Number.isFinite(risk?.rrNet)&&risk.rrNet>=prefs.minRR;
+  if(!priceInZone)reasons.push('قیمت از محدوده ورود مجاز خارج است؛ از تعقیب قیمت خودداری کنید');
+  if(!spreadOk)reasons.push('اسپرد فعلی از سقف مجاز عبور کرده است');
+  if(!rrOk)reasons.push(`R/R خالص کمتر از حداقل ${prefs.minRR} است`);
+  const technicalReady=fresh15&&fresh5&&context15&&trigger5&&Number.isFinite(triggerLevel)&&triggerLevel>0&&priceInZone;
+  const ready=technicalReady&&spreadOk&&rrOk;
+  return {ready,technicalReady,missing:false,reasons,setup,triggerLevel,entryLow,entryHigh,entryReference:currentAsk,volumeRatio,trend15:f15.trendScore,rsi15:m15.rsi,rsi5:m5.rsi,ema9_15:m15.ema9,ema20_15:m15.ema20,ema9_5:m5.ema9,ema20_5:m5.ema20,triggerCandleAt:last5.t,invalidationCandle:triggerLevel,invalidationHard:risk?.stopLoss,entryReason,context15,trigger5};
 }
 function computeEntryOpportunity(coin,record){
-  if(!coin||!record?.tfMap)return {state:'pending',coin,reason:['داده تحلیلی هنوز دریافت نشده است'],updatedAt:Date.now()};
-  const a=finalizeRecord(coin,record),dec=computeDecision(coin,a),risk=a.risk,mtf=a.mtf;
-  const baseMissing=[...dec.rows,...dec.risks].filter(x=>x.ok!==true).map(x=>`${x.name}: ${x.ok===null?'این شاخص در این نوبت دریافت یا محاسبه نشده است':`مقدار/وضعیت فعلی ${x.val}؛ شرط لازم ${x.need}`}`);
-  if(mtf?.blockReasons?.length)baseMissing.push(...mtf.blockReasons);
-  if(!marketHealthy)baseMissing.push('داده تازه بازار تأیید نشده است');
-  if(coin.marketClosed)baseMissing.push('بازار نماد در وضعیت بسته است');
-  if(Date.now()-(coin.quoteAt||0)>90000)baseMissing.push('قیمت خرید/فروش بیش از ۹۰ ثانیه قدیمی است');
-  const baseReady=dec.cls==='good'&&baseMissing.length===0&&!!risk&&risk.entry>0&&risk.stopLoss>0&&risk.takeProfit>risk.entry&&Number.isFinite(risk.rrNet)&&risk.rrNet>=prefs.minRR;
-  if(!baseReady){
-    const relevant=baseMissing.length?baseMissing:[dec.why||'شروط پایه هنوز کامل نیستند'];
-    const state=dec.cls==='hot'||(dec.cls==='no'&&baseMissing.length>0)?'blocked':'wait';
-    return {state,baseReady:false,coin,analysis:a,decision:dec,reasons:[...new Set(relevant)],updatedAt:Date.now(),priority:mtf?.trendScore||0};
+  if(!coin||!record?.tfMap)return {state:'pending',coin,reason:['داده تحلیلی هنوز دریافت نشده است'],updatedAt:Date.now(),strategyCandidate:false,surveillanceEligible:false,executionEligible:false};
+  const a=finalizeRecord(coin,record),dec=computeDecision(coin,a),risk=a.risk,discovery=computeOpportunityDiscovery(coin,a);
+  if(!discovery.candidate)return {state:'blocked',baseReady:false,surveillanceEligible:false,executionEligible:false,strategyCandidate:false,coin,analysis:a,decision:dec,reasons:[discovery.reason||'الگوی معاملاتی بالقوه شناسایی نشد'],updatedAt:Date.now(),priority:0,opportunityScore:0,tradeabilityScore:0};
+  const surveillance=computeSurveillanceEligibility(coin,a,discovery,{marketHealthy,now:Date.now()});
+  const selected=discovery.modes[0];
+  const surveillanceBase={coin,analysis:a,decision:dec,discovery,strategyCandidate:true,strategyId:selected.id,strategy:selected.label,opportunityScore:discovery.score,tradeabilityScore:discovery.tradeabilityScore,tradeability:discovery.tradeability,rankingScore:discovery.rankingScore,priority:discovery.rankingScore,updatedAt:Date.now()};
+  if(!surveillance.eligible){
+    return {...surveillanceBase,state:'blocked',baseReady:false,surveillanceEligible:false,executionEligible:false,surveillanceReasons:surveillance.reasons,reasons:[...surveillance.reasons],softWarnings:[]};
   }
-  const f15=a.tfMap['15m'],f5=a.tfMap['5m'];
-  const missing=[];
-  if(!closedFrame(f15,'15m'))missing.push('داده معتبر ۱۵ دقیقه‌ای در دسترس نیست یا کهنه است');
-  if(!closedFrame(f5,'5m'))missing.push('داده معتبر ۵ دقیقه‌ای در دسترس نیست یا کهنه است');
-  if(missing.length)return {state:'wait',baseReady:true,coin,analysis:a,decision:dec,reasons:missing,updatedAt:Date.now(),priority:mtf?.trendScore||0};
-
-  const m15=f15.metrics,m5=f5.metrics,c15=f15.candles,c5=f5.candles;
-  const last15=c15.at(-1),last5=c5.at(-1),prev5=c5.at(-2);
-  const avgVol=c5.slice(-21,-1).reduce((sum,c)=>sum+(Number(c.v)||0),0)/20;
-  const volRatio=avgVol>0?(last5.v/avgVol):null;
-  const priorHighs=c5.slice(-22,-2).map(c=>c.h).filter(Number.isFinite);
-  const triggerLevel=priorHighs.length?Math.max(...priorHighs):null;
-  const green5=last5.c>last5.o;
-  const fresh15=Number.isFinite(last15?.t)&&Date.now()-last15.t<=2*TIMEFRAMES['15m'].seconds*1000+3000;
-  const trend15Ok=!!m15&&fresh15&&m15.ema9>m15.ema20&&m15.rsi>=50&&m15.rsi<=70&&last15.c>m15.ema20&&f15.trendScore>=50;
-  const trend5Ok=!!m5&&m5.ema9>m5.ema20&&m5.rsi>=50&&m5.rsi<=75&&last5.c>m5.ema9;
-  const breakout=Number.isFinite(triggerLevel)&&prev5.c<=triggerLevel&&last5.c>triggerLevel&&green5&&Number.isFinite(volRatio)&&volRatio>=1.15;
-  const retest=Number.isFinite(triggerLevel)&&prev5.c>triggerLevel&&last5.l<=triggerLevel*1.003&&last5.c>triggerLevel&&green5&&Number.isFinite(volRatio)&&volRatio>=0.80;
-  const currentAsk=coin.bestAsk>0?coin.bestAsk:coin.price;
-  const chaseLimit=Number.isFinite(triggerLevel)?triggerLevel*1.008:null;
-  const priceInZone=Number.isFinite(triggerLevel)&&currentAsk>=triggerLevel*0.997&&currentAsk<=chaseLimit;
-  const candleFresh=Date.now()-last5.t<=2*TIMEFRAMES['5m'].seconds*1000;
-  const spreadOk=Number.isFinite(risk.spread)&&risk.spread<=prefs.maxSpread;
-  const rrOk=Number.isFinite(risk.rrNet)&&risk.rrNet>=prefs.minRR;
-  const reasons=[];
-  if(!fresh15)reasons.push('آخرین کندل بسته‌شده ۱۵ دقیقه‌ای قدیمی است؛ داده تازه لازم است.');
-  if(fresh15&&!trend15Ok)reasons.push('زمینه ۱۵ دقیقه‌ای هنوز صعودی و هم‌جهت نیست: EMA9 باید بالاتر از EMA20، RSI بین ۵۰ تا ۷۰ و بسته‌شدن قیمت بالاتر از EMA20 باشد.');
-  if(!trend5Ok)reasons.push('مومنتوم ۵ دقیقه‌ای کافی نیست: EMA9 باید بالاتر از EMA20 و RSI بین ۵۰ تا ۷۵ باشد.');
-  if(!breakout&&!retest)reasons.push(`منتظر شکست سقف ${triggerLevel?formatPrice(triggerLevel):'نامشخص'} با کندل سبز بسته‌شده و حجم مناسب، یا پولبک موفق به همین سطح بمانید.`);
-  if(!priceInZone)reasons.push(`قیمت از محدوده ماشه خارج شده است؛ محدوده مجاز فعلی ${triggerLevel?formatPrice(triggerLevel*0.997)+' تا '+formatPrice(chaseLimit):'قابل محاسبه نیست'} است؛ از تعقیب قیمت خودداری کنید.`);
-  if(!candleFresh)reasons.push('کندل ۵ دقیقه‌ای ماشه قدیمی است؛ تأیید تازه لازم است.');
-  if(!spreadOk)reasons.push('اسپرد فعلی از سقف مجاز عبور کرده است.');
-  if(!rrOk)reasons.push(`نسبت سود به زیان خالص از حداقل ${prefs.minRR} کمتر شده است.`);
-  const triggerReady=fresh15&&trend15Ok&&trend5Ok&&(breakout||retest)&&priceInZone&&candleFresh&&spreadOk&&rrOk;
-  const entryLow=Number.isFinite(triggerLevel)?triggerLevel*0.997:null;
-  const entryHigh=Number.isFinite(triggerLevel)?triggerLevel*1.008:null;
-  const invalidationCandle=Number.isFinite(triggerLevel)?triggerLevel:null;
-  const invalidationHard=risk.stopLoss;
-  const setup=breakout?'شکست مقاومت با کندل بسته‌شده':retest?'پولبک و تثبیت بالای مقاومت':'در انتظار ماشه';
-  return {state:triggerReady?'ready':'wait',baseReady:true,triggerReady,coin,analysis:a,decision:dec,reasons,setup,triggerLevel,entryLow,entryHigh,entryReference:currentAsk,target:risk.takeProfit,stopLoss:risk.stopLoss,rrNet:risk.rrNet,positionSize:risk.positionSize,notional:risk.notional,riskAmount:risk.riskAmount,support:risk.support,resistance:risk.ceiling,spread:risk.spread,volumeRatio:volRatio,rsi15:m15.rsi,rsi5:m5.rsi,ema9_15:m15.ema9,ema20_15:m15.ema20,ema9_5:m5.ema9,ema20_5:m5.ema20,trend1:a.tfMap['1h']?.trendScore,trend4:a.tfMap['4h']?.trendScore,trend15:f15.trendScore,triggerCandleAt:last5.t,invalidationCandle,invalidationHard,updatedAt:Date.now(),priority:mtf?.trendScore||0};
+  const globalFailures=(dec.risks||[]).filter(x=>x.ok!==true);
+  const globalMissing=globalFailures.map(x=>`${x.name}: ${x.ok===null?'داده یا محاسبه در دسترس نیست':`مقدار ${x.val}؛ شرط لازم ${x.need}`}`);
+  if(!marketHealthy)globalMissing.push('داده تازه بازار تأیید نشده است');
+  if(coin.marketClosed)globalMissing.push('بازار نماد بسته است');
+  if(Date.now()-(coin.quoteAt||0)>90000)globalMissing.push('قیمت خرید/فروش بیش از ۹۰ ثانیه قدیمی است');
+  if(a.snapshotMeta?.dataCoherent!==true)globalMissing.push('Snapshot تایم‌فریم‌های ۱H و ۴H هم‌تراز نیست');
+  if(!risk||risk.integrity?.valid!==true)globalMissing.push('محاسبه ریسک یا صحت Snapshot معتبر نیست');
+  if(!prefs.costAssumptionsConfirmed)globalMissing.push('کارمزد، لغزش و حداقل حجم باید در تنظیمات تأیید شوند');
+  const softWarnings=(dec.rows||[]).filter(x=>x.hard===false&&x.ok!==true).map(x=>`${x.name}: عامل تأییدی هنوز برقرار نیست (${x.val??'نامشخص'}؛ معیار ${x.need}).`);
+  const riskDistance=risk?.entry>0&&Number.isFinite(risk.stopLoss)?(risk.entry-risk.stopLoss)/risk.entry:Infinity;
+  if(riskDistance>.08)globalMissing.push('فاصله حد ضرر از ورود بیش از ۸٪ است؛ اندازه ریسک برای این فرصت مناسب نیست');
+  // Surveillance is independent of execution permission. Economic gates remain mandatory
+  // for entry, but closed 15m/5m candles are still evaluated to explain a blocked setup.
+  const executionEligible=globalMissing.length===0;
+  const executionBlockers=[...new Set(globalMissing)];
+  const base={...surveillanceBase,baseReady:executionEligible,surveillanceEligible:true,executionEligible,executionBlockers,softWarnings};
+  const f15=a.tfMap?.['15m'],f5=a.tfMap?.['5m'];
+  if(!closedFrame(f15,'15m')||!closedFrame(f5,'5m')){
+    const missing=[];if(!closedFrame(f15,'15m'))missing.push('داده معتبر و بسته‌شده ۱۵ دقیقه‌ای در صف دریافت پایش است');if(!closedFrame(f5,'5m'))missing.push('داده معتبر و بسته‌شده ۵ دقیقه‌ای در صف دریافت پایش است');
+    return {...base,state:'wait',technicalTriggerReady:false,triggerReady:false,reasons:[...executionBlockers,...missing,...softWarnings]};
+  }
+  const assessments=discovery.modes.map(mode=>({mode,result:assessStrategyTrigger(mode,coin,a,risk)})).sort((x,y)=>(Number(y.result.ready)-Number(x.result.ready))||(Number(y.result.technicalReady)-Number(x.result.technicalReady))||(y.mode.score-x.mode.score));
+  const chosen=assessments[0],mode=chosen.mode,ev=chosen.result;
+  const technicalReady=ev.technicalReady===true;
+  const ready=executionEligible&&ev.ready===true;
+  let reasons;
+  if(ready)reasons=[`استراتژی ${mode.label} در ۱۵m و ۵m تأیید شده است`,`کندل‌های بررسی‌شده بسته و تازه‌اند`,`R/R خالص ${risk.rrNet.toFixed(2)} و حداقل مجاز ${prefs.minRR} رعایت شده است`];
+  else if(technicalReady&&!executionEligible)reasons=[`ماشه تکنیکی ${mode.label} در ۱۵m/۵m تشکیل شده، اما مجوز ورود به دلیل شروط اقتصادی یا تنظیمات صادر نمی‌شود.`,...executionBlockers,...softWarnings];
+  else reasons=[...executionBlockers,...(ev.reasons||[]),...softWarnings];
+  const support=risk.support,resistance=risk.ceiling;
+  return {...base,state:ready?'ready':'wait',technicalTriggerReady:technicalReady,triggerReady:ready,triggerCandidateReady:technicalReady,modeScore:mode.score,reasons:[...new Set(reasons)],setup:ev.setup,entryReason:ev.entryReason,triggerLevel:ev.triggerLevel,entryLow:ev.entryLow,entryHigh:ev.entryHigh,entryReference:ev.entryReference,target:risk.takeProfit,stopLoss:risk.stopLoss,rrNet:risk.rrNet,positionSize:risk.positionSize,notional:risk.notional,riskAmount:risk.riskAmount,support,resistance,spread:risk.spread,volumeRatio:ev.volumeRatio,trend1:a.tfMap['1h']?.trendScore,trend4:a.tfMap['4h']?.trendScore,trend15:ev.trend15,rsi15:ev.rsi15,rsi5:ev.rsi5,ema9_15:ev.ema9_15,ema20_15:ev.ema20_15,ema9_5:ev.ema9_5,ema20_5:ev.ema20_5,triggerCandleAt:ev.triggerCandleAt,invalidationCandle:ev.invalidationCandle,invalidationHard:ev.invalidationHard};
+}
+const OPPORTUNITY_HISTORY_KEY='nb4:opportunity-history-v1';
+function tehranDayKey(at=Date.now()){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(at));
+  const get=t=>parts.find(x=>x.type===t)?.value||'00';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+function readOpportunityHistory(){
+  try{const parsed=JSON.parse(LS(OPPORTUNITY_HISTORY_KEY)||'[]');return Array.isArray(parsed)?parsed.filter(x=>x&&typeof x.key==='string'&&Number.isFinite(x.at)):[];}catch{return [];}
+}
+function recordOpportunityHistory(op){
+  if(!op?.triggerReady||!op.coin?.nobitexSymbol)return;
+  const candleAt=op.triggerCandleAt||0,day=tehranDayKey(),key=`${day}|${op.coin.nobitexSymbol}`;
+  const rows=readOpportunityHistory();if(rows.some(x=>x.key===key))return;
+  rows.push({key,day,at:Date.now(),symbol:op.coin.nobitexSymbol,base:op.coin.symbol,strategyId:op.strategyId||null,strategy:op.strategy||null,
+    opportunityScore:op.opportunityScore??null,entry:op.entryReference??null,target:op.target??null,stopLoss:op.stopLoss??null,rrNet:op.rrNet??null,candleAt});
+  rows.sort((a,b)=>a.at-b.at);if(rows.length>1000)rows.splice(0,rows.length-1000);
+  LS(OPPORTUNITY_HISTORY_KEY,JSON.stringify(rows));
+}
+function opportunityHistorySummary(){
+  const rows=readOpportunityHistory(),today=tehranDayKey(),todayCount=rows.filter(x=>x.day===today).length;
+  const days=new Set(rows.filter(x=>Date.now()-x.at<=30*86400000).map(x=>x.day));
+  const count30=rows.filter(x=>Date.now()-x.at<=30*86400000).length;
+  return {today:todayCount,count30,activeDays30:days.size,averagePerCalendarDay30:count30/30};
 }
 function notifyEntryOpportunity(op){
   if(!op?.triggerReady)return;
@@ -1230,6 +1405,7 @@ function notifyEntryOpportunity(op){
   ledger[op.coin.nobitexSymbol]=candleAt;
   const keys=Object.keys(ledger);if(keys.length>250)for(const k of keys.slice(0,keys.length-250))delete ledger[k];
   if(LS('nb4:entry-opportunity-alerts',JSON.stringify(ledger))===null)return;
+  recordOpportunityHistory(op);
   const body=`ورود مرجع ${formatPrice(op.entryReference)} | هدف ${formatPrice(op.target)} | حد ضرر ${formatPrice(op.stopLoss)} | R/R خالص ${op.rrNet.toFixed(2)}`;
   eventLog(`${op.coin.symbol}: ماشه ورود کم‌ریسک تأیید شد؛ ${body}`,'signal');
   notif.notify('ورود کم‌ریسک تأیید شد: '+op.coin.symbol,body,key,'buy');
@@ -1237,7 +1413,7 @@ function notifyEntryOpportunity(op){
 const ENTRY_CONFIRMATION_MS=6000;
 function publishOpportunity(coin,record){
   const frameStamp=k=>record?.tfMap?.[k]?.candles?.at(-1)?.t||0;
-  const fingerprint=[record?.updatedAt||0,coin.quoteAt||0,coin.price||0,coin.bestAsk||0,coin.bestBid||0,frameStamp('1h'),frameStamp('4h'),frameStamp('15m'),frameStamp('5m'),prefs.minRR,prefs.feeRate,prefs.slippageRate,prefs.maxSpread,prefs.minVolume,prefs.minQuality,prefs.capital,prefs.riskPct,prefs.costAssumptionsConfirmed,marketHealthy,Math.floor(Date.now()/30000)].join('|');
+  const fingerprint=[record?.updatedAt||0,coin.quoteAt||0,coin.price||0,coin.bestAsk||0,coin.bestBid||0,frameStamp('1h'),frameStamp('4h'),frameStamp('15m'),frameStamp('5m'),prefs.minRR,prefs.feeRate,prefs.slippageRate,prefs.maxSpread,prefs.minVolume,prefs.minQuality,prefs.capital,prefs.riskPct,prefs.costAssumptionsConfirmed,marketHealthy,Math.floor(Date.now()/5000)].join('|');
   const previous=opportunityState.get(coin.id);
   if(previous?._fingerprint===fingerprint)return previous;
   const next=computeEntryOpportunity(coin,record),now=Date.now(),candidateAt=next.triggerCandleAt||0;
@@ -1259,11 +1435,12 @@ async function ensureOpportunityFrames(coin){
   if(opportunityInflight.has(coin.id))return opportunityInflight.get(coin.id);
   const current=analysisCache.get(coin.id);if(!current)return null;
   const pre=computeEntryOpportunity(coin,current);if(!pre.baseReady)return pre; // Strict trading gates remain unchanged.
+  triggerMonitorLastAt.set(coin.id,Date.now());
   const task=(async()=>{
     let tfMap={...(current.tfMap||{})},changed=false;
     for(const key of ['15m','5m']){
       if(tfMap[key]&&!frameDue(coin,key))continue;
-      const res=await fetchTimeframe(coin,key,8,false);
+      const res=await fetchTimeframe(coin,key,STRICT_TRIGGER_FETCH_PRIORITY,false);
       const item=res.ready?analyzeTimeframe(res.candles,key,res.source):{ready:false,tf:key,trendScore:null,reversalScore:null,bearishReversalScore:null,dataQuality:res.quality?.quality??0,labels:[],candles:res.candles||[],candlesCount:(res.candles||[]).length};
       Object.assign(item,{source:res.source,pair:res.pair,stale:res.stale,networkError:res.networkError,error:res.error,validation:res.validation,fetchedAt:res.fetchedAt,dataQualityDetail:item.dataQualityDetail||res.quality||null});
       tfMap[key]=item;changed=true;
@@ -1280,31 +1457,33 @@ async function runOpportunityRefresh(){
   if(opportunityRefreshBusy||analysisPaused||(document.hidden&&!mayRunWhenHidden())||!marketHealthy||!allCoins.length)return;
   opportunityRefreshBusy=true;
   try{
-    const strictCandidates=[],monitorCandidates=[],dailyCandidates=[];
+    const monitorCandidates=[],dailyCandidates=[];
     for(const coin of allCoins){
       const rec=analysisCache.get(coin.id);if(!rec||opportunityInflight.has(coin.id))continue;
       const pre=publishOpportunity(coin,rec),m=pre.analysis?.mtf||rec.mtf;
-      if(m?.monitorKey==='early'||pre.baseReady){
-        const pulse=updateMonitorPulse(coin,pre);
-        monitorCandidates.push({coin,op:pre,score:monitorCandidateScore(pre.analysis),pulse});
+      if(pre.surveillanceEligible){
+        const pulse=updateMonitorPulse(coin,pre),lastMonitorAt=triggerMonitorLastAt.get(coin.id)||0;
+        const needsFrames=['15m','5m'].some(k=>frameDue(coin,k));
+        monitorCandidates.push({coin,op:pre,score:(pre.rankingScore??pre.opportunityScore??monitorCandidateScore(pre.analysis))+(pre.executionEligible?12:0),pulse,lastMonitorAt,needsFrames,strict:pre.executionEligible===true});
         const lastDiag=monitorDiagnosticAt.get(coin.id)||0;
         if(Date.now()-lastDiag>=MONITOR_DIAGNOSTIC_MS){monitorDiagnosticAt.set(coin.id,Date.now());recordDiagnosticSnapshot(coin,pre.analysis||rec);}
-        if(!rec.tfMap?.['1d']?.ready&&frameDue(coin,'1d'))dailyCandidates.push({coin,score:monitorCandidateScore(pre.analysis)});
+        if(!rec.tfMap?.['1d']?.ready&&frameDue(coin,'1d'))dailyCandidates.push({coin,score:pre.rankingScore??pre.opportunityScore??0});
+      }else if(pre.strategyCandidate||m?.monitorKey==='early'){
+        // Preserve blocked candidates in diagnostics and the UI, but never spend 5m/15m requests on stale or incoherent inputs.
+        const lastDiag=monitorDiagnosticAt.get(coin.id)||0;if(Date.now()-lastDiag>=MONITOR_DIAGNOSTIC_MS){monitorDiagnosticAt.set(coin.id,Date.now());recordDiagnosticSnapshot(coin,pre.analysis||rec);}
       }
-      if(pre.baseReady&&(['15m','5m'].some(k=>frameDue(coin,k))))strictCandidates.push({coin,score:pre.priority||0});
     }
-    strictCandidates.sort((a,b)=>b.score-a.score);
-    // Only one strict trigger refresh per scheduler pass. The queue remains globally throttled.
-    if(strictCandidates.length&&opportunityInflight.size<MAX_BACKGROUND_TRIGGER_JOBS&&Date.now()>=netCooldown)await ensureOpportunityFrames(strictCandidates[0].coin);
-    // When no symbol has passed every trading gate, sample 5m/15m for one best raw candidate only.
-    // This is a data-path test; it cannot qualify the symbol for entry or bypass any gate.
-    if(!strictCandidates.length&&opportunityInflight.size===0&&monitorCandidates.length&&!triggerProbeCooldownActive()){
-      monitorCandidates.sort((a,b)=>b.score-a.score);
-      await probeCandidateTimeframes(monitorCandidates[0].coin);
+    const now=Date.now();
+    const due=monitorCandidates.filter(x=>x.needsFrames&&now-x.lastMonitorAt>=TRIGGER_MONITOR_SYMBOL_COOLDOWN_MS);
+    // Fair queue: oldest monitored symbol first; tradeability and discovery rank break ties.
+    due.sort((a,b)=>(a.lastMonitorAt-b.lastMonitorAt)||(b.score-a.score));
+    if(due.length&&!triggerMonitorBusy&&opportunityInflight.size===0&&now>=netCooldown){
+      const next=due[0];
+      if(next.strict)await ensureOpportunityFrames(next.coin);
+      else await ensureMonitorTriggerFrames(next.coin);
     }
-    // Daily OHLC is optional: enrich at most one monitored candidate every five minutes,
-    // outside the serial 150-symbol base scan, to keep the scan path shorter.
-    if(!strictCandidates.length&&opportunityInflight.size===0&&!triggerProbeBusy&&dailyCandidates.length&&Date.now()>=nextDailyMonitorAt&&!dailyMonitorBusy){
+    // Daily OHLC remains optional and is scheduled outside the primary 5m/15m surveillance queue.
+    if(!due.length&&opportunityInflight.size===0&&!triggerMonitorBusy&&dailyCandidates.length&&Date.now()>=nextDailyMonitorAt&&!dailyMonitorBusy){
       dailyCandidates.sort((a,b)=>b.score-a.score);
       nextDailyMonitorAt=Date.now()+DAILY_MONITOR_COOLDOWN_MS;
       ensureMonitorDailyFrame(dailyCandidates[0].coin).catch(e=>eventLog('غنی‌سازی روزانه ناموفق: '+e.message,'info'));
@@ -1313,7 +1492,7 @@ async function runOpportunityRefresh(){
   }finally{opportunityRefreshBusy=false;}
 }
 function renderAllOpportunityReasons(op){
-  const items=[...(op?.reasons||[]).filter(Boolean).map(x=>String(x)),...(op?.analysis?.mtf?.monitorReasons||[]).filter(Boolean).map(x=>String(x))];
+  const items=[...(op?.reasons||[]).filter(Boolean).map(x=>String(x)),...(!op?.strategyId?(op?.analysis?.mtf?.monitorReasons||[]).filter(Boolean).map(x=>String(x)):[])];
   if(!items.length){
     const gates=[...(op?.decision?.rows||[]),...(op?.decision?.risks||[])];
     for(const g of gates){if(g.ok===true)continue;items.push(`${g.name||'شرط معاملاتی'}: ${g.ok===null?'داده یا محاسبه در دسترس نیست':`مقدار فعلی ${g.val??'—'}؛ شرط لازم ${g.need??'—'}`}`)}
@@ -1331,34 +1510,45 @@ function monitorQualityLabel(record,key,required){
   return `${status}؛ ${q.bars}/${q.minBars} کندل؛ پوشش ${Number.isFinite(q.coveragePercent)?q.coveragePercent:0}٪${q.maxGap!=null?`؛ شکاف ${q.maxGap}`:''}`;
 }
 function renderMonitorCandidateCard(item){
-  const {coin,op,record,tier}=item,analysis=op.analysis||record||{},mtf=analysis.mtf||{},risk=analysis.risk||{};
-  const tag=op.state==='ready'?'آماده':op.state==='blocked'?'ردشده':'در انتظار';
+  const {coin,op,record}=item,analysis=op.analysis||record||{},risk=analysis.risk||{};
+  const strategy=op.strategy||'استراتژی در حال ارزیابی';
+  const status=op.executionEligible?'واجد شرایط دروازه ورود؛ منتظر ماشه':op.surveillanceEligible?'در صف پایش ۱۵m/۵m؛ مجوز ورود صادر نشده':'مسدود؛ داده یا Snapshot پایه نامعتبر';
+  const price=coin.bestAsk>0?coin.bestAsk:coin.price;
+  const score=Number.isFinite(op.opportunityScore)?Math.round(op.opportunityScore):'—';
+  const tradeScore=Number.isFinite(op.tradeabilityScore)?Math.round(op.tradeabilityScore):'—';
+  const rr=Number.isFinite(risk.rrNet)?risk.rrNet.toFixed(2):'—';
+  const primary=(op.reasons||[]).filter(Boolean)[0]||'شرط بعدی در نوبت تحلیل بررسی می‌شود';
   const q1=monitorQualityLabel(analysis,'1h',true),q4=monitorQualityLabel(analysis,'4h',true);
-  const probeSampled=record?.triggerProbe?.sampled===true||analysis?.triggerProbe?.sampled===true;
-  const q15=monitorQualityLabel(analysis,'15m',op.baseReady===true||probeSampled),q5=monitorQualityLabel(analysis,'5m',op.baseReady===true||probeSampled);
-  const pulse=item.pulse||monitorPulseMap.get(coin.id),pulseSnap=pulse?.snap||{};
-  const pulseChanges=(pulse?.changes||[]).slice(-3).map(x=>escapeHTML(x.label)).join('؛ ');
-  const pulseMarkup=`<div class="monitor-pulse"><b>پایش خودکار:</b> قیمت ${Number.isFinite(pulseSnap.price)?formatPrice(pulseSnap.price):'—'}؛ اسپرد ${Number.isFinite(pulseSnap.spread)?(pulseSnap.spread*100).toFixed(3)+'٪':'نامشخص'}؛ حجم ۲۴ساعته ${Number.isFinite(pulseSnap.volume)?Math.round(pulseSnap.volume).toLocaleString('en-US')+' USDT':'—'}؛ فاصله تا حمایت ${Number.isFinite(pulseSnap.supportDistancePct)?pulseSnap.supportDistancePct.toFixed(2)+'٪':'—'}؛ فضای تا مقاومت ${Number.isFinite(pulseSnap.resistanceRoomPct)?pulseSnap.resistanceRoomPct.toFixed(2)+'٪':'—'}؛ آخرین پایش ${pulseSnap.at?new Date(pulseSnap.at).toLocaleTimeString('fa-IR'):'—'}${pulseChanges?`<div class="monitor-pulse-changes">تغییرات اخیر: ${pulseChanges}</div>`:''}</div>`;
-  const probeNote=probeSampled?`<div class="dr-note">نمونه‌برداری تشخیصی ۵m/۱۵m: ${escapeHTML(record.triggerProbe.status||'انجام شده')}؛ این آزمون صرفاً برای کنترل مسیر داده است و مجوز ورود محسوب نمی‌شود.</div>`:'';
-  const val=(x)=>Number.isFinite(x)&&x>0?formatPrice(x):'—';
-  const rr=Number.isFinite(risk.rrNet)?risk.rrNet.toFixed(2):'قابل محاسبه نیست';
-  const blockers=renderAllOpportunityReasons(op);
-  return `<article class="op-card wait monitor-candidate-card">
-    <div class="op-card-top"><div><b>${escapeHTML(coin.symbol)}/USDT</b><small>${escapeHTML(mtf.signal||mtf.monitorLabel||'نامزد تحت پایش')}</small></div><span class="op-tag wait">${tag}</span></div>
-    <div class="op-price-grid op-wait-grid">
-      <div><span>امتیاز روند ۴H / ۱H</span><strong dir="ltr">${Number.isFinite(mtf.trendScore)?mtf.trendScore:'—'} / ${Number.isFinite(analysis.tfMap?.['1h']?.trendScore)?analysis.tfMap['1h'].trendScore:'—'}</strong></div>
-      <div><span>R/R خالص</span><strong dir="ltr">${rr}</strong></div>
-      <div><span>قیمت فعلی</span><strong dir="ltr">${val(coin.bestAsk>0?coin.bestAsk:coin.price)}</strong></div>
-      <div><span>ورود / هدف / حد ضرر محاسباتی</span><strong dir="ltr">${val(risk.entry)} / ${val(risk.takeProfit)} / ${val(risk.stopLoss)}</strong></div>
-      <div><span>کیفیت داده ۱H</span><strong>${q1}</strong></div>
-      <div><span>کیفیت داده ۴H</span><strong>${q4}</strong></div>
-      <div><span>کیفیت داده ۱۵m</span><strong>${q15}</strong></div>
-      <div><span>کیفیت داده ۵m</span><strong>${q5}</strong></div>
+  const monitorSampled=record?.triggerMonitoring?.active===true||analysis?.triggerMonitoring?.active===true;
+  const q15=monitorQualityLabel(analysis,'15m',op.surveillanceEligible===true||monitorSampled),q5=monitorQualityLabel(analysis,'5m',op.surveillanceEligible===true||monitorSampled);
+  const pulse=item.pulse||monitorPulseMap.get(coin.id),snap=pulse?.snap||{};
+  const val=x=>Number.isFinite(x)&&x>0?formatPrice(x):'—';
+  const detail=`<details class="op-card-details"><summary>جزئیات فنی و شروط باقی‌مانده</summary>
+    <div class="op-detail-grid">
+      <span>روند ۴H / ۱H: <b dir="ltr">${analysis.tfMap?.['4h']?.trendScore??'—'} / ${analysis.tfMap?.['1h']?.trendScore??'—'}</b></span>
+      <span>کیفیت داده ۱H: <b>${escapeHTML(q1)}</b></span>
+      <span>کیفیت داده ۴H: <b>${escapeHTML(q4)}</b></span>
+      <span>کیفیت داده ۱۵m: <b>${escapeHTML(q15)}</b></span>
+      <span>کیفیت داده ۵m: <b>${escapeHTML(q5)}</b></span>
+      <span>اسپرد: <b dir="ltr">${Number.isFinite(risk.spread)?(risk.spread*100).toFixed(3)+'٪':'—'}</b></span>
+      <span>قابلیت معامله: <b dir="ltr">${Number.isFinite(op.tradeabilityScore)?Math.round(op.tradeabilityScore)+'/100':'—'}</b></span><span>حجم ۲۴ساعته: <b dir="ltr">${Number.isFinite(coin.volume)?Math.round(coin.volume).toLocaleString('en-US')+' USDT':'—'}</b></span>
+      <span>حجم نسبی: <b dir="ltr">${Number.isFinite(op.discovery?.relVol)?op.discovery.relVol.toFixed(2)+'×':'—'}</b></span>
+      <span>حمایت / مقاومت: <b dir="ltr">${val(risk.support)} / ${val(risk.ceiling)}</b></span>
+      <span>آخرین پایش: <b>${snap.at?new Date(snap.at).toLocaleTimeString('fa-IR'):'—'}</b></span>
+    </div>${renderAllOpportunityReasons(op)}
+    <p class="dr-note">امتیاز کشف و قابلیت معامله صرفاً برای رتبه‌بندی است؛ این نماد هنوز مجوز ورود یا ثبت سفارش ندارد.</p>
+  </details>`;
+  return `<article class="op-card wait monitor-candidate-card compact-monitor-card">
+    <div class="op-card-top"><div><b>${escapeHTML(coin.symbol)}/USDT</b><small>${escapeHTML(strategy)} · کشف ${score}/100 · قابلیت معامله ${tradeScore}/100</small></div><span class="op-tag wait">${escapeHTML(status)}</span></div>
+    <div class="op-compact-summary">
+      <span><small>قیمت</small><b dir="ltr">${val(price)}</b></span>
+      <span><small>R/R خالص</small><b dir="ltr">${rr}</b></span>
+      <span><small>قابلیت معامله</small><b dir="ltr">${tradeScore}/100</b></span>
+      <span><small>ورود محاسباتی</small><b dir="ltr">${val(risk.entry)}</b></span>
     </div>
-    ${pulseMarkup}
-    ${probeNote}
-    ${blockers}
-    <div class="op-card-actions"><button type="button" class="refresh-btn" data-op-open="${escapeHTML(coin.id)}">گزارش کامل ارز</button><button type="button" class="refresh-btn" data-watch-add="${escapeHTML(coin.nobitexSymbol)}">＋ واچ‌لیست</button></div>
+    <div class="op-primary-reason"><b>مانع یا شرط بعدی:</b><span>${escapeHTML(primary)}</span></div>
+    ${detail}
+    <div class="op-card-actions"><button type="button" class="refresh-btn" data-op-open="${escapeHTML(coin.id)}">گزارش کامل</button><button type="button" class="refresh-btn" data-watch-add="${escapeHTML(coin.nobitexSymbol)}">＋ واچ‌لیست</button></div>
   </article>`;
 }
 function renderMonitorCandidatesBoard(){
@@ -1368,58 +1558,96 @@ function renderMonitorCandidatesBoard(){
     const record=analysisCache.get(coin.id);if(!record)continue;
     const op=publishOpportunity(coin,record),m=op.analysis?.mtf||record.mtf||{};
     if(op.state==='ready')continue;
-    if(m.monitorKey==='early'||op.baseReady){
-      const tier=op.baseReady?'trigger':m.monitorQualified?'qualified':'raw';
-      candidates.push({coin,record,op,tier,score:Number(m.trendScore)||Number(op.priority)||0});
+    if(op.strategyCandidate||op.baseReady||m.monitorKey==='early'){
+      const tier=op.baseReady?'trigger':record.triggerMonitoring?.active?'monitoring':m.monitorQualified?'qualified':'raw';
+      candidates.push({coin,record,op,tier,score:Number(op.rankingScore)||Number(op.priority)||Number(op.opportunityScore)||Number(m.trendScore)||0});
     }
   }
-  const weight={trigger:3,qualified:2,raw:1};
+  const weight={trigger:4,monitoring:3,qualified:2,raw:1};
+  candidates.forEach(x=>{if(x.op.baseReady)x.tier='trigger';else if(x.record.triggerMonitoring?.active)x.tier='monitoring';});
   candidates.sort((a,b)=>(weight[b.tier]-weight[a.tier])||(b.score-a.score));
-  const raw=candidates.filter(x=>x.tier==='raw').length,qualified=candidates.filter(x=>x.tier==='qualified').length,trigger=candidates.filter(x=>x.tier==='trigger').length;
-  $('monitorRawCount').textContent=`نامزد خام: ${raw}`;
-  $('monitorQualifiedCount').textContent=`نامزد واجد شرایط: ${qualified}`;
-  $('monitorTriggerCount').textContent=`در مرحله ماشه: ${trigger}`;
-  host.innerHTML=candidates.length?candidates.slice(0,30).map(renderMonitorCandidateCard).join('')+(candidates.length>30?`<div class="opportunity-empty">${candidates.length-30} نامزد دیگر در پایش داخلی هستند؛ ۳۰ مورد برتر در این پنل نمایش داده شده‌اند.</div>`:''):'<div class="opportunity-empty">در حال حاضر نامزد پایش اولیه یا نمادی در مرحله ماشه شناسایی نشده است. این وضعیت به‌معنای فقدان داده بازار نیست.</div>';
+  const raw=candidates.filter(x=>x.op.strategyCandidate&&!x.op.surveillanceEligible).length;
+  const qualified=candidates.filter(x=>x.op.surveillanceEligible&&!x.op.executionEligible).length;
+  const monitoring=candidates.filter(x=>x.record.triggerMonitoring?.active===true&&Date.now()-(x.record.triggerMonitoring.at||0)<20*60*1000).length;
+  const trigger=candidates.filter(x=>x.op.baseReady).length;
+  $('monitorRawCount').textContent=`نامزدهای استراتژی: ${raw}`;
+  $('monitorQualifiedCount').textContent=`نامزدهای در صف پایش: ${qualified}`;
+  const monitorActiveCount=$('monitorActiveCount');if(monitorActiveCount)monitorActiveCount.textContent=`پایش ۵m/۱۵m: ${monitoring}`;
+  $('monitorTriggerCount').textContent=`دروازه ورود: ${trigger}`;
+  host.innerHTML=candidates.length?candidates.slice(0,30).map(renderMonitorCandidateCard).join('')+(candidates.length>30?`<div class="opportunity-empty">${candidates.length-30} نامزد دیگر در پایش داخلی هستند؛ ۳۰ مورد برتر در این پنل نمایش داده شده‌اند.</div>`:''):'<div class="opportunity-empty">در حال حاضر نامزد پایش اولیه یا نمادی دروازه ورود شناسایی نشده است. این وضعیت به‌معنای فقدان داده بازار نیست.</div>';
 }
 
 function renderOpportunityCard(op,compact=false){
-  const coin=op.coin,r=op.analysis?.risk;
+  const coin=op.coin,r=op.analysis?.risk||{},strategy=escapeHTML(op.strategy||'الگوی در حال ارزیابی');
+  const score=Number.isFinite(op.opportunityScore)?Math.round(op.opportunityScore):'—';
+  const rr=Number.isFinite(op.rrNet)?op.rrNet.toFixed(2):Number.isFinite(r.rrNet)?r.rrNet.toFixed(2):'—';
+  const price=coin.bestAsk>0?coin.bestAsk:coin.price;
+  const reason=(op.reasons||[]).filter(Boolean);
+  const mainReason=op.technicalTriggerReady&&!op.executionEligible?'ماشه تکنیکی تشکیل شده است؛ اما حداقل R/R، هزینه یا یکی از شروط مجوز ورود هنوز تأیید نشده.':reason[0]||op.entryReason||'شرط بعدی در نوبت پایش بررسی می‌شود';
+  const reasonsMarkup=renderAllOpportunityReasons(op);
+  const waitLevels=`<div class="op-compact-summary"><span><small>قیمت</small><b dir="ltr">${formatPrice(price)}</b></span><span><small>امتیاز کشف</small><b dir="ltr">${score}/100</b></span><span><small>قابلیت معامله</small><b dir="ltr">${Number.isFinite(op.tradeabilityScore)?Math.round(op.tradeabilityScore):'—'}/100</b></span><span><small>R/R خالص</small><b dir="ltr">${rr}</b></span></div>`;
+  const detailMarkup=`<details class="op-card-details"><summary>جزئیات تحلیل، شروط و موانع (${reason.length||0})</summary>${reasonsMarkup}<div class="op-detail-grid">
+    <span>روند ۴H / ۱H: <b dir="ltr">${op.trend4??op.analysis?.tfMap?.['4h']?.trendScore??'—'} / ${op.trend1??op.analysis?.tfMap?.['1h']?.trendScore??'—'}</b></span>
+    <span>اسپرد: <b dir="ltr">${Number.isFinite(r.spread)?(r.spread*100).toFixed(3)+'٪':'—'}</b></span>
+    <span>حجم نسبی ۵m: <b dir="ltr">${Number.isFinite(op.volumeRatio)?op.volumeRatio.toFixed(2)+'×':'پس از دریافت داده'}</b></span>
+    <span>حمایت / مقاومت: <b dir="ltr">${Number.isFinite(r.support)?formatPrice(r.support):'—'} / ${Number.isFinite(r.ceiling)?formatPrice(r.ceiling):'—'}</b></span>
+    <span>قابلیت معامله: <b dir="ltr">${Number.isFinite(op.tradeabilityScore)?Math.round(op.tradeabilityScore)+'/100':'—'}</b></span><span>حجم ۲۴ساعته: <b dir="ltr">${Number.isFinite(coin.volume)?Math.round(coin.volume).toLocaleString('en-US')+' USDT':'—'}</b></span>
+    <span>ورود مرجع: <b dir="ltr">${Number.isFinite(r.entry)?formatPrice(r.entry):'—'}</b></span><span>هدف ساختاری: <b dir="ltr">${Number.isFinite(r.takeProfit)?formatPrice(r.takeProfit):'—'}</b></span><span>حد ضرر محاسباتی: <b dir="ltr">${Number.isFinite(r.stopLoss)?formatPrice(r.stopLoss):'—'}</b></span>
+    <span>کیفیت داده: <b>۱H و ۴H ${op.analysis?.snapshotMeta?.dataCoherent?'هم‌تراز':'نیازمند کنترل'}</b></span>
+  </div></details>`;
   if(!op.triggerReady){
-    const reasonMarkup=renderAllOpportunityReasons(op);
-    const waitVal=(label,value)=>`<div><span>${label}</span><strong dir="ltr">${Number.isFinite(value)&&value>0?formatPrice(value):'—'}</strong></div>`;
-    const waitLevels=`<div class="op-price-grid op-wait-grid">${waitVal('قیمت خرید/فروش فعلی',coin.bestAsk>0?coin.bestAsk:coin.price)}${waitVal('ورود مرجع محاسباتی',r?.entry)}${waitVal('حمایت ساختاری',r?.support)}${waitVal('مقاومت بالاسر',r?.ceiling)}${waitVal('هدف ساختاری فعلی',r?.takeProfit)}${waitVal('حد ضرر محاسباتی',r?.stopLoss)}</div>`;
-    const triggerInfo=Number.isFinite(op.triggerLevel)?`سطح ماشه: <b dir="ltr">${formatPrice(op.triggerLevel)}</b>؛ محدوده اولیه ورود ${formatPrice(op.entryLow)} تا ${formatPrice(op.entryHigh)}`:'محدوده ماشه دقیق هنوز قابل محاسبه نیست؛ ابتدا باید داده معتبر ۱۵ و ۵ دقیقه‌ای دریافت شود.';
-    const invalidation=r?.stopLoss>0?`تا پیش از فعال‌شدن ماشه، این سطوح صرفاً محاسباتی‌اند؛ رسیدن قیمت به حد ضرر مرجع ${formatPrice(r.stopLoss)} یا از بین رفتن شروط روند، طرح فعلی را باطل می‌کند.`:'تا تکمیل داده‌ها، شرط ابطال و حد ضرر معتبر قابل اعلام نیست.';
-    const tag=op.state==='blocked'?'ردشده':'در انتظار';
-    return `<article class="op-card wait ${op.state==='blocked'?'blocked':''}"><div class="op-card-top"><b>${escapeHTML(coin.symbol)}/USDT</b><span class="op-tag wait">${tag}</span></div>${reasonMarkup}${waitLevels}<div class="op-trigger-hint">${triggerInfo}</div><div class="op-invalidation">${invalidation}</div><div class="op-card-actions"><button type="button" class="refresh-btn" data-op-open="${escapeHTML(coin.id)}">گزارش کامل ارز</button><button type="button" class="refresh-btn" data-watch-add="${escapeHTML(coin.nobitexSymbol)}">＋ واچ‌لیست</button></div></article>`;
+    const tag=op.technicalTriggerReady&&!op.executionEligible?'ماشه فنی تأیید؛ ورود مسدود':op.baseReady?'در انتظار تأیید ماشه ۱۵m/۵m':op.surveillanceEligible?'در پایش؛ مجوز ورود صادر نشده':'مسدود؛ پایش متوقف است';
+    const triggerInfo=Number.isFinite(op.triggerLevel)?`سطح ماشه ${formatPrice(op.triggerLevel)}؛ محدوده ورود ${formatPrice(op.entryLow)} تا ${formatPrice(op.entryHigh)}`:mainReason;
+    return `<article class="op-card wait ${op.state==='blocked'?'blocked':''}">
+      <div class="op-card-top"><div><b>${escapeHTML(coin.symbol)}/USDT</b><small>${strategy} · امتیاز کشف ${score}/100 · قابلیت معامله ${Number.isFinite(op.tradeabilityScore)?Math.round(op.tradeabilityScore):'—'}/100</small></div><span class="op-tag wait">${tag}</span></div>
+      <div class="op-primary-reason"><b>چه چیزی باید رخ دهد؟</b><span>${escapeHTML(mainReason)}</span></div>
+      ${waitLevels}
+      <div class="op-trigger-hint">${escapeHTML(triggerInfo)}</div>
+      ${detailMarkup}
+      <div class="op-card-actions"><button type="button" class="refresh-btn" data-op-open="${escapeHTML(coin.id)}">گزارش کامل و نمودار</button><button type="button" class="refresh-btn" data-watch-add="${escapeHTML(coin.nobitexSymbol)}">＋ واچ‌لیست</button></div>
+    </article>`;
   }
   const pct=(v,b)=>Number.isFinite(v)&&Number.isFinite(b)&&b>0?`${((v-b)/b*100).toFixed(2)}٪`:'—';
   const zone=`${formatPrice(op.entryLow)} تا ${formatPrice(op.entryHigh)}`;
-  const rr=Number.isFinite(op.rrNet)?op.rrNet.toFixed(2):'—';
-  return `<article class="op-card ready"><div class="op-card-top"><div><b>${escapeHTML(coin.symbol)}/USDT</b><small>${escapeHTML(op.setup||'ماشه فعال')}</small></div><span class="op-tag ready">آماده</span></div><div class="op-price-grid">
-    <div><span>قیمت مرجع ورود</span><strong dir="ltr">${formatPrice(op.entryReference)}</strong></div><div><span>محدوده مجاز ورود</span><strong dir="ltr">${zone}</strong></div>
-    <div><span>هدف سود</span><strong class="positive" dir="ltr">${formatPrice(op.target)} <small>(${pct(op.target,op.entryReference)})</small></strong></div><div><span>حد ضرر</span><strong class="negative" dir="ltr">${formatPrice(op.stopLoss)} <small>(${pct(op.stopLoss,op.entryReference)})</small></strong></div>
-    <div><span>R/R خالص</span><strong dir="ltr">${rr}</strong></div><div><span>حجم پیشنهادی</span><strong dir="ltr">${Number.isFinite(op.positionSize)?op.positionSize.toFixed(6):'—'} ${escapeHTML(coin.symbol)}</strong></div>
-    <div><span>ارزش موقعیت</span><strong dir="ltr">${Number.isFinite(op.notional)?op.notional.toFixed(2)+' USDT':'—'}</strong></div><div><span>زیان برآوردی در حد ضرر</span><strong class="negative" dir="ltr">${Number.isFinite(op.riskAmount)?op.riskAmount.toFixed(2)+' USDT':'—'}</strong></div>
-    <div><span>حمایت ساختاری</span><strong dir="ltr">${Number.isFinite(op.support)?formatPrice(op.support):'—'}</strong></div><div><span>مقاومت بالاسر</span><strong dir="ltr">${Number.isFinite(op.resistance)?formatPrice(op.resistance):'—'}</strong></div>
-    <div><span>حجم کندل ۵ دقیقه</span><strong dir="ltr">${Number.isFinite(op.volumeRatio)?op.volumeRatio.toFixed(2)+'× میانگین':'—'}</strong></div><div><span>اسپرد فعلی</span><strong dir="ltr">${Number.isFinite(op.spread)?(op.spread*100).toFixed(3)+'٪':'—'}</strong></div>
-    <div><span>قدرت روند ۴H / ۱H</span><strong dir="ltr">${Number.isFinite(op.trend4)?op.trend4:'—'} / ${Number.isFinite(op.trend1)?op.trend1:'—'}</strong></div><div><span>امتیاز روند ۱۵m</span><strong dir="ltr">${Number.isFinite(op.trend15)?op.trend15:'—'}</strong></div>
-    <div><span>RSI پانزده / پنج دقیقه</span><strong dir="ltr">${Number.isFinite(op.rsi15)?op.rsi15.toFixed(1):'—'} / ${Number.isFinite(op.rsi5)?op.rsi5.toFixed(1):'—'}</strong></div><div><span>EMA9 / EMA20 (۱۵m)</span><strong dir="ltr">${formatPrice(op.ema9_15)} / ${formatPrice(op.ema20_15)}</strong></div><div><span>EMA9 / EMA20 (۵m)</span><strong dir="ltr">${formatPrice(op.ema9_5)} / ${formatPrice(op.ema20_5)}</strong></div>
-  </div><div class="op-invalidation"><b>شرط ابطال:</b> بسته‌شدن کندل ۵ دقیقه‌ای زیر سطح ماشه ${formatPrice(op.invalidationCandle)} یا بسته‌شدن کندل ۱۵ دقیقه‌ای زیر EMA20؛ در هر حال رسیدن قیمت به حد ضرر ${formatPrice(op.invalidationHard)} به معنی خروج طبق برنامه ریسک است. اگر بیش از ۱۰ دقیقه از کندل ماشه بگذرد، قیمت خرید بیش از ۹۰ ثانیه به‌روزرسانی نشود یا R/R از حد مجاز پایین‌تر بیاید، سیگنال منقضی می‌شود.</div><div class="op-confirmation">تأییدها: روند ۱H/۴H، زمینه ۱۵m، شکست/پولبک کندل بسته‌شده ۵m، حجم و اسپرد معتبر.</div><div class="op-card-actions"><button type="button" class="refresh-btn" data-op-open="${escapeHTML(coin.id)}">مشاهده گزارش و نمودار</button><button type="button" class="refresh-btn" data-watch-add="${escapeHTML(coin.nobitexSymbol)}">＋ واچ‌لیست</button></div></article>`;
+  return `<article class="op-card ready">
+    <div class="op-card-top"><div><b>${escapeHTML(coin.symbol)}/USDT</b><small>${strategy} · ${escapeHTML(op.setup||'ماشه تأییدشده')}</small></div><span class="op-tag ready">آماده بررسی ورود</span></div>
+    <div class="op-price-grid op-ready-core">
+      <div><span>قیمت مرجع ورود</span><strong dir="ltr">${formatPrice(op.entryReference)}</strong></div>
+      <div><span>محدوده مجاز ورود</span><strong dir="ltr">${zone}</strong></div>
+      <div><span>هدف فروش</span><strong class="positive" dir="ltr">${formatPrice(op.target)} <small>(${pct(op.target,op.entryReference)})</small></strong></div>
+      <div><span>حد ضرر</span><strong class="negative" dir="ltr">${formatPrice(op.stopLoss)} <small>(${pct(op.stopLoss,op.entryReference)})</small></strong></div>
+      <div><span>R/R خالص پس از هزینه‌ها</span><strong dir="ltr">${rr}</strong></div>
+      <div><span>زیان برآوردی در حد ضرر</span><strong class="negative" dir="ltr">${Number.isFinite(op.riskAmount)?op.riskAmount.toFixed(2)+' USDT':'—'}</strong></div>
+    </div>
+    <div class="op-confirmation"><b>دلیل پیشنهاد:</b> ${escapeHTML(op.entryReason||'شروط استراتژی و ماشه تأیید شده‌اند')}. این وضعیت به معنی ارسال سفارش نیست؛ قیمت زنده و اعتبار سیگنال پیش از ثبت دستی سفارش دوباره کنترل شود.</div>
+    <div class="op-invalidation"><b>شرط ابطال:</b> شکست سطح ماشه ${formatPrice(op.invalidationCandle)}، رسیدن قیمت به حد ضرر ${formatPrice(op.invalidationHard)}، کهنه‌شدن مظنه یا افت R/R خالص به کمتر از ${prefs.minRR}.</div>
+    ${detailMarkup}
+    <div class="op-card-actions"><button type="button" class="refresh-btn" data-op-open="${escapeHTML(coin.id)}">گزارش کامل و نمودار</button><button type="button" class="refresh-btn" data-watch-add="${escapeHTML(coin.nobitexSymbol)}">＋ واچ‌لیست</button></div>
+  </article>`;
 }
 function renderOpportunityBoard(){
-  const readyHost=$('opportunityReadyList'),waitHost=$('opportunityWaitList');if(!readyHost||!waitHost)return;
+  const readyHost=$('opportunityReadyList'),waitHost=$('opportunityWaitList'),blockedHost=$('opportunityBlockedList');if(!readyHost||!waitHost)return;
   const rows=[];
-  for(const coin of allCoins){const rec=analysisCache.get(coin.id);if(!rec)continue;const op=publishOpportunity(coin,rec);if(op.state==='ready'||op.baseReady||((op.analysis?.mtf?.trendScore||0)>=45&&op.analysis?.mtf?.gates?.mandatoryReady))rows.push(op);}
-  const analyzed=scannedSymbolCount();
-  const ready=rows.filter(x=>x.state==='ready').sort((a,b)=>(b.rrNet||0)-(a.rrNet||0));
-  const wait=rows.filter(x=>x.state!=='ready').sort((a,b)=>(b.priority||0)-(a.priority||0));
-  $('opReadyCount').textContent=`ورود تأییدشده: ${ready.length}`;
-  $('opWaitCount').textContent=`در انتظار: ${wait.length}`;
+  for(const coin of allCoins){const rec=analysisCache.get(coin.id);if(!rec)continue;const op=publishOpportunity(coin,rec);if(op.strategyCandidate||op.state==='ready'||op.baseReady)rows.push(op);}
+  const analyzed=scannedSymbolCount(),strategyFilter=$('opportunityStrategyFilter')?.value||'all';
+  const rank=x=>Number(x.rankingScore??x.priority??x.opportunityScore)||0;
+  const readyAll=rows.filter(x=>x.state==='ready').sort((a,b)=>rank(b)-rank(a)||(b.rrNet||0)-(a.rrNet||0));
+  const waitAll=rows.filter(x=>x.state==='wait').sort((a,b)=>rank(b)-rank(a));
+  const blockedAll=rows.filter(x=>x.state==='blocked').sort((a,b)=>rank(b)-rank(a));
+  const match=x=>strategyFilter==='all'||x.strategyId===strategyFilter;
+  const ready=readyAll.filter(match),wait=waitAll.filter(match),blocked=blockedAll.filter(match);
+  $('opReadyCount').textContent=`آماده بررسی ورود: ${readyAll.length}`;
+  $('opWaitCount').textContent=`در انتظار تکمیل/پایش: ${waitAll.length}`;
+  const surveillanceHost=$('opSurveillanceCount');if(surveillanceHost)surveillanceHost.textContent=`واجد شرایط پایش ۵m/۱۵m: ${rows.filter(x=>x.surveillanceEligible).length}`;
   $('opScannedCount').textContent=`بررسی‌شده: ${analyzed}/${allCoins.length}`;
-  $('opportunityWaitSummary').textContent=`${wait.length} مورد`;
-  readyHost.innerHTML=ready.length?ready.map(x=>renderOpportunityCard(x)).join(''):'<div class="opportunity-empty">در حال حاضر هیچ نمادی تمام شروط ورود را هم‌زمان ندارد. این بخش مستقل از فیلترها و واچ‌لیست است و پس از تأیید کندل ۵ دقیقه‌ای به‌روزرسانی می‌شود.</div>';
-  waitHost.innerHTML=wait.length?wait.slice(0,15).map(x=>renderOpportunityCard(x,true)).join(''):'<div class="opportunity-empty">موردی برای انتظار تأیید در داده‌های فعلی شناسایی نشده است.</div>';
+  const dailyStats=opportunityHistorySummary(),todayHost=$('opTodayCount');if(todayHost)todayHost.textContent=`فرصت‌های تأییدشده امروز: ${dailyStats.today} از هدف پایش ۵`;
+  $('opportunityWaitSummary').textContent=`${waitAll.length} مورد`;
+  if($('opportunityBlockedSummary'))$('opportunityBlockedSummary').textContent=`${blockedAll.length} مورد`;
+  const statsHost=$('opStrategySummary');
+  if(statsHost){const defs=Object.values(OPPORTUNITY_STRATEGIES);statsHost.innerHTML=defs.map(d=>{const count=rows.filter(x=>x.strategyId===d.id).length;return `<span>${escapeHTML(d.label)}: <b>${count}</b></span>`}).join('');}
+  readyHost.innerHTML=ready.length?ready.slice(0,10).map(x=>renderOpportunityCard(x)).join(''):'<div class="opportunity-empty">در این Snapshot فرصت دارای تمام شروط ورود پیدا نشده است. فیلتر استراتژی را روی «همه» بگذارید یا نامزدهای در انتظار را بررسی کنید؛ شروط نهایی ریسک کاهش داده نشده‌اند.</div>';
+  waitHost.innerHTML=wait.length?wait.slice(0,16).map(x=>renderOpportunityCard(x,true)).join(''):'<div class="opportunity-empty">نامزد قابل پایشی با این فیلتر استراتژی وجود ندارد.</div>';
+  if(blockedHost)blockedHost.innerHTML=blocked.length?blocked.slice(0,12).map(x=>renderOpportunityCard(x,true)).join(''):'<div class="opportunity-empty">مورد مسدودشده‌ای در این فیلتر وجود ندارد.</div>';
   renderMonitorCandidatesBoard();
 }
 
@@ -1434,7 +1662,25 @@ function renderTable(coins){
 
   const enriched=coins.map(c=>({coin:c, analysis:finalizeRecord(c,analysisCache.get(c.id)||null)}));
   const sf=signalFilter.value;
-  const sk=x=>x.analysis?.mtf?.monitorKey==='early'?(x.analysis?.mtf?.monitorQualified?'earlyQualified':'early'):(x.analysis?.mtf?.signalKey||'pending');
+  const signalCategory=x=>{
+    const m=x.analysis?.mtf||{},sig=m.signalKey||'pending';
+    if(sig==='await'){
+      const decision=computeDecision(x.coin,x.analysis);
+      if(decision.cls==='hot')return 'riskblocked';
+      if(decision.cls==='no')return decision.category==='risk_reward'||decision.category==='risk'?'riskblocked':'unconfirmed';
+      return 'await';
+    }
+    if(sig==='ready'&&!m.eligible)return 'await';
+    return sig;
+  };
+  const matchesSignalFilter=x=>{
+    const m=x.analysis?.mtf||{},category=signalCategory(x);
+    if(sf==='early')return m.monitorKey==='early'&&!m.monitorQualified;
+    if(sf==='earlyQualified')return m.monitorKey==='early'&&m.monitorQualified;
+    if(sf==='all')return true;
+    if(sf==='buyish')return ['ready','await','reversal'].includes(category);
+    return category===sf;
+  };
   const pre=enriched.filter(x=>{
     if(hideStableCoins && STABLES.has(String(x.coin.symbol).toUpperCase())) return false;
     if(q){ const s=(x.coin.symbol||'').toLowerCase(), n=(x.coin.name||'').toLowerCase();
@@ -1452,17 +1698,13 @@ function renderTable(coins){
     }
     return true;
   });
-  const cnt={}; pre.forEach(x=>{ const k=sk(x); cnt[k]=(cnt[k]||0)+1; });
-  cnt.buyish=(cnt.ready||0)+(cnt.await||0)+(cnt.reversal||0); cnt.all=pre.length;
+  const cnt={}; pre.forEach(x=>{const k=signalCategory(x);cnt[k]=(cnt[k]||0)+1;const m=x.analysis?.mtf||{};if(m.monitorKey==='early'){const mk=m.monitorQualified?'earlyQualified':'early';cnt[mk]=(cnt[mk]||0)+1;}});
+  cnt.buyish=(cnt.ready||0)+(cnt.await||0)+(cnt.reversal||0);cnt.all=pre.length;
   [...signalFilter.options].forEach(o=>{ o.textContent=`${o.dataset.l} (${cnt[o.value]||0})`; });
   let filtered=pre.filter(x=>{
-    const k=sk(x), a=x.analysis?.mtf;if(onlyConf&&!a?.eligible)return false;
-    if(sf==='all'){
-      if(!onlyConf) return true;
-      return !!a?.eligible;
-    }
-    if(sf==='buyish') return k==='ready'||k==='await'||k==='reversal';
-    return k===sf;
+    const a=x.analysis?.mtf;if(onlyConf&&!a?.eligible)return false;
+    if(!matchesSignalFilter(x))return false;
+    return true;
   });
 
   filtered=sortCoins(filtered);
@@ -2190,7 +2432,7 @@ function initSortHeaders(){
 }
 
 function init(){installJournalButton();installDiagnosticsButton();try{PROXY=validProxy(PROXY)}catch(error){PROXY='';LS('proxyUrl','');eventLog('واسط اختصاصی نامعتبر بود و غیرفعال شد: '+String(error?.message||error).slice(0,120),'info')}initSortHeaders();renderDiag();loadingState.style.display='block';tableContainer.style.display='none';countBadge.textContent='در انتظار بازار واقعی';analysisBadge.textContent='تحلیل: ۰';(async()=>{await idbOpen();await hydrateDiagnosticHistory();await restoreBackgroundMonitor();renderDiag();dbPrune().catch(error=>eventLog('پاک‌سازی کش محلی ناموفق بود: '+String(error?.message||error).slice(0,120),'info'));const cached=await dbGet('meta','universe');if(Array.isArray(cached?.coins)&&cached.coins.length){setUniverse(cached.coins.filter(c=>/^[A-Z0-9]{1,24}USDT$/.test(c.nobitexSymbol)).slice(0,TOP_LIMIT));countBadge.textContent=`${allCoins.length} بازار ذخیره‌شده؛ نیازمند دریافت تازه`;loadingState.style.display='none';tableContainer.style.display='block';renderTable(allCoins)}refreshData()})().catch(e=>eventLog('راه‌اندازی: '+e.message));refreshBtn.addEventListener('click',refreshData);tickerTimer=setInterval(()=>{if(!document.hidden||mayRunWhenHidden())refreshData()},TICKER_REFRESH_MS);for(const control of [trendFilter,signalFilter,hideStable,onlyConfirmed,ichiFilter])control.addEventListener('change',()=>renderTable(allCoins));for(const control of [searchInput,minScoreInput,minRRInput])control.addEventListener('input',debounce(()=>renderTable(allCoins),250));tableBody.addEventListener('click',event=>{const add=event.target.closest('[data-watch-add]');if(add){event.preventDefault();event.stopPropagation();const c=coinBySym.get(add.dataset.watchAdd);if(c)addCoinToWatchlist(c,'table-filter');return;}const row=event.target.closest('tr[data-id]'),coin=row&&coinById.get(row.dataset.id);if(coin)openCoinDetail(coin)});
-$('watchManualAddBtn').addEventListener('click',()=>addManualWatchSymbol($('watchManualSymbol').value));$('watchManualSymbol').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addManualWatchSymbol(e.currentTarget.value)}});$('watchAddFilteredBtn').addEventListener('click',addFilteredResultsToWatchlist);$('addEarlyBtn').addEventListener('click',()=>addEarlyMonitorCandidates(false));$('addEarlyQualifiedBtn').addEventListener('click',()=>addEarlyMonitorCandidates(true));$('addAwaitBtn').addEventListener('click',()=>{if(signalFilter.value!=='await'){uiAlert('ابتدا فیلتر سیگنال را روی «در انتظار تأیید ورود» قرار دهید.');return;}const q=(searchInput.value||'').trim().toLowerCase(),trend=trendFilter.value;const candidates=allCoins.map(coin=>({coin,analysis:finalizeRecord(coin,analysisCache.get(coin.id)||null)})).filter(x=>{const m=x.analysis?.mtf;if(m?.signalKey!=='await'||(hideStable.checked&&STABLES.has(String(x.coin.symbol).toUpperCase()))||(q&&!x.coin.symbol.toLowerCase().includes(q)&&!(x.coin.name||'').toLowerCase().includes(q))||(num(minScoreInput.value,0)>0&&(m.quality??0)<num(minScoreInput.value,0))||(num(minRRInput.value,0)>0&&(x.analysis?.risk?.rrNet??0)<num(minRRInput.value,0)))return false;const target={strong_bull:'صعودی قوی',bull:'صعودی',neutral:'خنثی',bear:'نزولی',strong_bear:'نزولی قوی'}[trend];return trend==='all'||(m.label?.label||'نامشخص')===target});if(!candidates.length){uiAlert('با فیلترهای فعلی، ارز واجد شرایطی در انتظار ماشه ورود نیست.');return;}addAwaitCandidates(candidates)});$('exportWatchlistBtn').addEventListener('click',exportWatchlist);$('clearWatchlistBtn').addEventListener('click',async()=>{if(await uiConfirm('تمام ارزهای واچ‌لیست حذف شوند؟')){watchlist=[];saveWatchlist()}});$('monitorCandidatesPanel').addEventListener('click',e=>{const w=e.target.closest('[data-watch-add]');if(w){e.preventDefault();e.stopPropagation();const c=coinBySym.get(w.dataset.watchAdd);if(c)addCoinToWatchlist(c,'monitor-filter');return;}const b=e.target.closest('[data-op-open]');if(b){const c=coinById.get(b.dataset.opOpen);if(c)openCoinDetail(c)}});$('entryOpportunityPanel').addEventListener('click',e=>{const w=e.target.closest('[data-watch-add]');if(w){e.preventDefault();e.stopPropagation();const c=coinBySym.get(w.dataset.watchAdd);if(c)addCoinToWatchlist(c,'opportunity-filter');return;}const b=e.target.closest('[data-op-open]');if(b){const c=coinById.get(b.dataset.opOpen);if(c)openCoinDetail(c)}});$('watchlistBody').addEventListener('click',e=>{const rm=e.target.closest('[data-watch-remove]'),op=e.target.closest('[data-watch-open]');if(rm){watchlist=watchlist.filter(x=>x.symbol!==rm.dataset.watchRemove);saveWatchlist()}else if(op){const c=coinById.get(op.dataset.watchOpen);if(c)openCoinDetail(c)}});renderWatchlist();tableBody.addEventListener('keydown',event=>{if(event.key==='Enter'){const row=event.target.closest('tr[data-id]'),coin=row&&coinById.get(row.dataset.id);if(coin)openCoinDetail(coin)}});modalClose.addEventListener('click',closeModal);modalOverlay.addEventListener('click',e=>{if(e.target===modalOverlay)closeModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});window.addEventListener('online',()=>{netCooldown=0;refreshData();wsConnect()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&!mayRunWhenHidden())wsStop();else{refreshData();wsConnect();scheduleRender()}});notifBtn.textContent='🔔 اعلان خاموش';notifBtn.addEventListener('click',async()=>{if(notif.enabled)notif.disable();else await notif.enable();notifBtn.classList.toggle('active',notif.enabled);notifBtn.textContent=notif.enabled?'🔔 اعلان فعال':'🔔 اعلان خاموش'});testSoundBtn.textContent='🔊 صدا خاموش';testSoundBtn.title='فعال‌سازی مستقل صدا؛ بدون درخواست مجوز اعلان';testSoundBtn.addEventListener('click',async()=>{if(notif.soundEnabled)notif.soundEnabled=false;else if(await notif.enableSound())notif.beep('buy',true);testSoundBtn.classList.toggle('active',notif.soundEnabled);testSoundBtn.textContent=notif.soundEnabled?'🔊 صدا فعال':'🔊 صدا خاموش'});proxyBtn.textContent='⚙ اتصال و ریسک';proxyBtn.onclick=showSettings;const pause=$('pauseBtn');pause.onclick=()=>{analysisPaused=!analysisPaused;pause.textContent=analysisPaused?'▶ ادامه اسکن':'⏸ توقف اسکن';updateAnalysisStatus()};$('backgroundMonitorBtn').addEventListener('click',()=>setBackgroundMonitorEnabled(!backgroundMonitorEnabled));$('portfolioBacktestBtn')?.addEventListener('click',runPortfolioBacktest);$('eventsBtn').onclick=showEvents;$('modalRetry').onclick=()=>{if(modalCurrentCoin&&!modalBusy)analyzeCoin(modalCurrentCoin,true,true).then(()=>{modalRefreshAt=0;refreshOpenModal();scheduleRender()}).catch(e=>eventLog(e.message))};setInterval(()=>{if(!document.hidden){updateAnalysisStatus();scheduleRender()}},15000);if(opportunityRefreshTimer)clearInterval(opportunityRefreshTimer);opportunityRefreshTimer=setInterval(()=>runOpportunityRefresh().catch(e=>eventLog('موتور فرصت‌یابی: '+e.message,'info')),MONITOR_REFRESH_MS);if(backgroundMonitorStatusTimer)clearInterval(backgroundMonitorStatusTimer);backgroundMonitorStatusTimer=setInterval(()=>{if(backgroundMonitorEnabled)syncBackgroundMonitor()},15000);wsConnect();window.addEventListener('beforeunload',()=>{if(backgroundMonitorEnabled)return;analysisLoopShouldRun=false;clearInterval(tickerTimer);wsStop()});}
+$('opportunityStrategyFilter')?.addEventListener('change',renderOpportunityBoard);$('watchManualAddBtn').addEventListener('click',()=>addManualWatchSymbol($('watchManualSymbol').value));$('watchManualSymbol').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addManualWatchSymbol(e.currentTarget.value)}});$('watchAddFilteredBtn').addEventListener('click',addFilteredResultsToWatchlist);$('addEarlyBtn').addEventListener('click',()=>addEarlyMonitorCandidates(false));$('addEarlyQualifiedBtn').addEventListener('click',()=>addEarlyMonitorCandidates(true));$('addAwaitBtn').addEventListener('click',()=>{if(signalFilter.value!=='await'){uiAlert('ابتدا فیلتر سیگنال را روی «در انتظار تأیید ورود» قرار دهید.');return;}const q=(searchInput.value||'').trim().toLowerCase(),trend=trendFilter.value;const candidates=allCoins.map(coin=>({coin,analysis:finalizeRecord(coin,analysisCache.get(coin.id)||null)})).filter(x=>{const m=x.analysis?.mtf;if(m?.signalKey!=='await'||!['wait','good'].includes(computeDecision(x.coin,x.analysis).cls)||(hideStable.checked&&STABLES.has(String(x.coin.symbol).toUpperCase()))||(q&&!x.coin.symbol.toLowerCase().includes(q)&&!(x.coin.name||'').toLowerCase().includes(q))||(num(minScoreInput.value,0)>0&&(m.quality??0)<num(minScoreInput.value,0))||(num(minRRInput.value,0)>0&&(x.analysis?.risk?.rrNet??0)<num(minRRInput.value,0)))return false;const target={strong_bull:'صعودی قوی',bull:'صعودی',neutral:'خنثی',bear:'نزولی',strong_bear:'نزولی قوی'}[trend];return trend==='all'||(m.label?.label||'نامشخص')===target});if(!candidates.length){uiAlert('با فیلترهای فعلی، ارز واجد شرایطی در انتظار ماشه ورود نیست.');return;}addAwaitCandidates(candidates)});$('exportWatchlistBtn').addEventListener('click',exportWatchlist);$('clearWatchlistBtn').addEventListener('click',async()=>{if(await uiConfirm('تمام ارزهای واچ‌لیست حذف شوند؟')){watchlist=[];saveWatchlist()}});$('monitorCandidatesPanel').addEventListener('click',e=>{const w=e.target.closest('[data-watch-add]');if(w){e.preventDefault();e.stopPropagation();const c=coinBySym.get(w.dataset.watchAdd);if(c)addCoinToWatchlist(c,'monitor-filter');return;}const b=e.target.closest('[data-op-open]');if(b){const c=coinById.get(b.dataset.opOpen);if(c)openCoinDetail(c)}});$('entryOpportunityPanel').addEventListener('click',e=>{const w=e.target.closest('[data-watch-add]');if(w){e.preventDefault();e.stopPropagation();const c=coinBySym.get(w.dataset.watchAdd);if(c)addCoinToWatchlist(c,'opportunity-filter');return;}const b=e.target.closest('[data-op-open]');if(b){const c=coinById.get(b.dataset.opOpen);if(c)openCoinDetail(c)}});$('watchlistBody').addEventListener('click',e=>{const rm=e.target.closest('[data-watch-remove]'),op=e.target.closest('[data-watch-open]');if(rm){watchlist=watchlist.filter(x=>x.symbol!==rm.dataset.watchRemove);saveWatchlist()}else if(op){const c=coinById.get(op.dataset.watchOpen);if(c)openCoinDetail(c)}});renderWatchlist();tableBody.addEventListener('keydown',event=>{if(event.key==='Enter'){const row=event.target.closest('tr[data-id]'),coin=row&&coinById.get(row.dataset.id);if(coin)openCoinDetail(coin)}});modalClose.addEventListener('click',closeModal);modalOverlay.addEventListener('click',e=>{if(e.target===modalOverlay)closeModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});window.addEventListener('online',()=>{netCooldown=0;refreshData();wsConnect()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&!mayRunWhenHidden())wsStop();else{refreshData();wsConnect();scheduleRender()}});notifBtn.textContent='🔔 اعلان خاموش';notifBtn.addEventListener('click',async()=>{if(notif.enabled)notif.disable();else await notif.enable();notifBtn.classList.toggle('active',notif.enabled);notifBtn.textContent=notif.enabled?'🔔 اعلان فعال':'🔔 اعلان خاموش'});testSoundBtn.textContent='🔊 صدا خاموش';testSoundBtn.title='فعال‌سازی مستقل صدا؛ بدون درخواست مجوز اعلان';testSoundBtn.addEventListener('click',async()=>{if(notif.soundEnabled)notif.soundEnabled=false;else if(await notif.enableSound())notif.beep('buy',true);testSoundBtn.classList.toggle('active',notif.soundEnabled);testSoundBtn.textContent=notif.soundEnabled?'🔊 صدا فعال':'🔊 صدا خاموش'});proxyBtn.textContent='⚙ اتصال و ریسک';proxyBtn.onclick=showSettings;const pause=$('pauseBtn');pause.onclick=()=>{analysisPaused=!analysisPaused;pause.textContent=analysisPaused?'▶ ادامه اسکن':'⏸ توقف اسکن';updateAnalysisStatus()};$('backgroundMonitorBtn').addEventListener('click',()=>setBackgroundMonitorEnabled(!backgroundMonitorEnabled));$('portfolioBacktestBtn')?.addEventListener('click',runPortfolioBacktest);$('eventsBtn').onclick=showEvents;$('modalRetry').onclick=()=>{if(modalCurrentCoin&&!modalBusy)analyzeCoin(modalCurrentCoin,true,true).then(()=>{modalRefreshAt=0;refreshOpenModal();scheduleRender()}).catch(e=>eventLog(e.message))};setInterval(()=>{if(!document.hidden){updateAnalysisStatus();scheduleRender()}},15000);if(opportunityRefreshTimer)clearInterval(opportunityRefreshTimer);opportunityRefreshTimer=setInterval(()=>runOpportunityRefresh().catch(e=>eventLog('موتور فرصت‌یابی: '+e.message,'info')),TRIGGER_MONITOR_REFRESH_MS);if(backgroundMonitorStatusTimer)clearInterval(backgroundMonitorStatusTimer);backgroundMonitorStatusTimer=setInterval(()=>{if(backgroundMonitorEnabled)syncBackgroundMonitor()},15000);wsConnect();window.addEventListener('beforeunload',()=>{if(backgroundMonitorEnabled)return;analysisLoopShouldRun=false;clearInterval(tickerTimer);wsStop()});}
 
 
 // v4 runtime state and helpers
