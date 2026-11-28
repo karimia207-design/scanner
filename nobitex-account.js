@@ -133,8 +133,8 @@
   }
   async function loadCredentials() {
     if (bridge?.isAndroid) {
-      const [publicKey, privateKey] = await Promise.all([bridge.secureGet(STORE_PUBLIC), bridge.secureGet(STORE_PRIVATE)]);
-      return publicKey && privateKey ? { publicKey, privateKey, native: true } : null;
+      const publicKey = await bridge.secureGet(STORE_PUBLIC);
+      return publicKey ? { publicKey, privateKey: null, native: true } : null;
     }
     const record = await webCredentialGet();
     if (!record) return null;
@@ -160,26 +160,13 @@
     const publicBytes = decodeB64Url(publicKey);
     if (publicBytes.length !== 32) throw new Error('طول Public Key معتبر نیست؛ کلید عمومی باید به ۳۲ بایت رمزگشایی شود.');
     const normalizedPublicKey = String(publicKey).trim().replace(/\s+/g, '');
-    const signature = await signEd25519(privateKey, timestamp + method + path);
     let response, data;
     if (bridge?.isAndroid) {
-      response = await bridge.httpRequest({
-        url: API_BASE + path,
-        method,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'NobitexScanner/7.1.0 Android',
-          'Nobitex-Key': normalizedPublicKey,
-          'Nobitex-Timestamp': timestamp,
-          'Nobitex-Signature': signature
-        },
-        connectTimeout: 15000,
-        readTimeout: 20000,
-        responseType: 'json'
-      });
+      response = await bridge.signedWalletRequest({ publicKey: normalizedPublicKey });
       if (!response || typeof response.status !== 'number') throw new Error('پاسخ HTTP معتبر از پل اندروید دریافت نشد. اتصال اینترنت و نسخه Android System WebView را بررسی کنید.');
       data = response.data;
     } else {
+      const signature = await signEd25519(privateKey, timestamp + method + path);
       if (!window.isSecureContext) throw new Error('اتصال API در نسخه وب فقط از HTTPS امکان‌پذیر است؛ برنامه را از GitHub Pages با نشانی https باز کنید.');
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20000);
@@ -256,7 +243,7 @@
       const credentials = await loadCredentials();
       const connected = Boolean(credentials);
       statusText.textContent = connected
-        ? (bridge?.isAndroid ? 'کلیدها در Android Keystore همین گوشی ذخیره شده‌اند؛ اتصال فقط‌خواندنی فعال است.' : 'کلید عمومی و کلید امضای غیرقابل‌استخراج در حافظه محلی همین مرورگر ذخیره شده‌اند؛ اتصال فقط‌خواندنی فعال است.')
+        ? (bridge?.isAndroid ? 'کلید عمومی ذخیره است؛ کلید خصوصی رمزگذاری‌شده در فضای بومی گوشی می‌ماند و امضا داخل Android Native انجام می‌شود؛ اتصال فقط‌خواندنی فعال است.' : 'کلید عمومی و کلید امضای غیرقابل‌استخراج در حافظه محلی همین مرورگر ذخیره شده‌اند؛ اتصال فقط‌خواندنی فعال است.')
         : 'کلید اختصاصی هنوز در این دستگاه ثبت نشده است. برای دریافت موجودی، کلیدهای API فقط‌خواندنی را اضافه کنید.';
       statusBadge.textContent = connected ? 'کلید ذخیره‌شده؛ آماده بررسی' : 'اتصال برقرار نشده';
       statusBadge.className = connected ? 'nbxApiBadge ok' : 'nbxApiBadge warn';
@@ -286,35 +273,51 @@
   }
   async function saveKeys() {
     const publicKey = $('nbxApiPublicInput').value.trim().replace(/\s+/g, '');
-    const privateKeyText = $('nbxApiPrivateInput').value.trim();
+    let privateKeyText = $('nbxApiPrivateInput').value.trim();
     if (!publicKey || !privateKeyText) return setMessage('هر دو مقدار Public Key و Private Key لازم است.', 'err');
     if (!bridge?.isAndroid && !window.isSecureContext) return setMessage('نسخه وب باید از نشانی HTTPS اجرا شود؛ از اجرای مستقیم فایل HTML استفاده نکنید.', 'err');
     saveButton.disabled = true;
     saveButton.textContent = 'در حال آزمایش امضا و اتصال…';
-    setMessage('در حال ارسال درخواست فقط‌خواندنی به نوبیتکس؛ کلید تا دریافت پاسخ موفق ذخیره نمی‌شود…');
+    setMessage('در حال ثبت رمزگذاری‌شده موقت در لایه بومی برای امضای درخواست فقط‌خواندنی؛ در صورت شکست آزمون، ثبت موقت حذف می‌شود…');
     let privateKeyForTest = privateKeyText;
+    let nativeEnrollmentStarted = false;
     try {
-      if (!bridge?.isAndroid) privateKeyForTest = await importPrivateKey(privateKeyText);
+      if (bridge?.isAndroid) {
+        // Store encrypted before testing; the native signer decrypts and signs internally.
+        // If authentication fails, the temporary enrollment is removed in catch below.
+        await bridge.secureSet(STORE_PUBLIC, publicKey);
+        nativeEnrollmentStarted = true;
+        await bridge.secureSet(STORE_PRIVATE, privateKeyText);
+        privateKeyForTest = null;
+      } else {
+        privateKeyForTest = await importPrivateKey(privateKeyText);
+      }
       const wallets = await signedWalletRequest(publicKey, privateKeyForTest);
-      await persistCredentials(publicKey, bridge?.isAndroid ? privateKeyText : privateKeyForTest);
+      if (!bridge?.isAndroid) await persistCredentials(publicKey, privateKeyForTest);
       $('nbxApiPublicInput').value = '';
       $('nbxApiPrivateInput').value = '';
       renderWallets(wallets);
-      statusText.textContent = `اتصال خواندنی برقرار و کلید در ${bridge?.isAndroid ? 'Android Keystore' : 'حافظه محلی مرورگر'} ذخیره شد؛ ${fmt(wallets.length)} کیف‌پول دریافت شد.`;
+      statusText.textContent = `اتصال خواندنی برقرار و کلید در ${bridge?.isAndroid ? 'ذخیره‌سازی رمزگذاری‌شده با Android Keystore' : 'حافظه محلی مرورگر'} ذخیره شد؛ ${fmt(wallets.length)} کیف‌پول دریافت شد.`;
       statusBadge.textContent = 'متصل و فقط خواندنی'; statusBadge.className = 'nbxApiBadge ok';
       refreshButton.disabled = false; forgetButton.style.display = '';
       setMessage('اتصال موفق بود؛ فقط دسترسی READ استفاده شد و هیچ سفارش یا برداشتی انجام نمی‌شود.', 'ok');
       setTimeout(hideModal, 900);
     } catch (e) {
+      if (bridge?.isAndroid && nativeEnrollmentStarted) {
+        try { await removeCredentials(); }
+        catch (cleanupError) { console.warn('حذف ثبت موقت کلید ناموفق بود', cleanupError); }
+      }
       $('nbxApiPrivateInput').value = '';
-      setMessage(e?.message ? `آزمایش اتصال ناموفق بود؛ کلیدی ذخیره نشد.\n${e.message}` : 'آزمایش اتصال ناموفق بود؛ کلیدی ذخیره نشد.', 'err');
+      setMessage(e?.message ? `آزمایش اتصال ناموفق بود؛ کلید موقت از حافظه بومی حذف شد.\n${e.message}` : 'آزمایش اتصال ناموفق بود؛ کلید موقت از حافظه بومی حذف شد.', 'err');
     } finally {
+      privateKeyForTest = null;
+      privateKeyText = null;
       saveButton.disabled = false;
       saveButton.textContent = 'آزمایش اتصال و ذخیره امن';
     }
   }
   async function forgetKeys() {
-    if (!window.confirm('کلیدهای API فقط از همین دستگاه/مرورگر حذف شوند؟ این کار کلید را از پنل نوبیتکس باطل نمی‌کند.')) return;
+    if (!(await (window.NobitexDialogs?.confirm?.('کلیدهای API فقط از همین دستگاه/مرورگر حذف شوند؟ این کار کلید را از پنل نوبیتکس باطل نمی‌کند.') ?? Promise.resolve(false)))) return;
     try {
       await removeCredentials();
       walletSummary.replaceChildren(); walletSummary.classList.remove('visible');
